@@ -1,12 +1,12 @@
 # lolpin 改进版
 
-lolPing AI 第二版 · 0.6.0。仓库名：`lolpin-improved`。
+lolPing AI 第二版 · 0.6.1。仓库名：`lolpin-improved`。
 
-[下载 Windows 安装包与源码包](https://github.com/etasp/lolpin-improved/releases/tag/v0.6.0)
+[下载 Windows 安装包与源码包](https://github.com/etasp/lolpin-improved/releases/tag/v0.6.1)
 
 基于 [darrenprx/lolPing](https://github.com/darrenprx/lolPing) 的自用改造，原作者 Danrui Meng。本包不是原作官方更新。
 
-## 0.6.0 呼出修复
+## 0.6.1 呼出修复
 
 - Codex 入口改为官方支持的 codex://threads/new。
 - Windows 在打开链接后恢复并激活 Codex / ChatGPT 的桌面窗口，失败时显示提示；不会注入按键或自动发送问题。
@@ -15,7 +15,7 @@ lolPing AI 第二版 · 0.6.0。仓库名：`lolpin-improved`。
 - 如果微信等窗口里轮盘无法展开，可在“触发”中关闭“全屏程序中暂停”；该选项关闭后，游戏等全屏程序也不会自动暂停 ping，请按自己的使用场景设置。
 - 要用问号直接呼出 AI，在“AI 助手 / 模式 → 每种 ping 的动作”中将问号改成“直接呼出 AI”。API 智能面板仍可选择使用。
 
-## 0.6.0 屏幕 AI 气泡
+## 0.6.1 屏幕 AI 气泡
 
 结合 [LOLping AI Assistant](https://github.com/renyuzhu1-jpg/LOLping-AI-Assistant) 的屏幕气泡交互，保留 Codex / CC / DS 呼出和手动确认面板。
 
@@ -112,4 +112,4 @@ npm test
 npm run build
 ```
 
-Windows 安装包可使用本次交付的 lolPing-AI-Setup-0.6.0.exe。公开补丁仓库命名 lolpin-improved，项目显示名称为“lolpin 改进版”。GitHub 发布状态以交付说明及实际仓库链接为准，不自动发布到自媒体。
+Windows 安装包可使用本次交付的 lolPing-AI-Setup-0.6.1.exe。公开补丁仓库命名 lolpin-improved，项目显示名称为“lolpin 改进版”。GitHub 发布状态以交付说明及实际仓库链接为准，不自动发布到自媒体。

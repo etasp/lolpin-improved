@@ -1,24 +1,24 @@
 diff --git a/package-lock.json b/package-lock.json
-index ea3127c..edc9b16 100644
+index ea3127c..b4c4f5d 100644
 --- a/package-lock.json
 +++ b/package-lock.json
 @@ -1,12 +1,12 @@
  {
    "name": "lolping",
 -  "version": "0.5.1",
-+  "version": "0.6.0",
++  "version": "0.6.1",
    "lockfileVersion": 3,
    "requires": true,
    "packages": {
      "": {
        "name": "lolping",
 -      "version": "0.5.1",
-+      "version": "0.6.0",
++      "version": "0.6.1",
        "license": "MIT",
        "devDependencies": {
          "@fluentui/react-components": "9.74.9",
 diff --git a/package.json b/package.json
-index c08a347..b1418d9 100644
+index c08a347..ca10e18 100644
 --- a/package.json
 +++ b/package.json
 @@ -1,7 +1,7 @@
@@ -26,10 +26,19 @@ index c08a347..b1418d9 100644
    "name": "lolping",
    "productName": "lolPing",
 -  "version": "0.5.1",
-+  "version": "0.6.0",
++  "version": "0.6.1",
    "private": true,
    "description": "League of Legends style ping wheel for your Windows and macOS desktop",
    "author": "Danrui Meng (https://github.com/darrenprx)",
+@@ -49,7 +49,7 @@
+     "appId": "com.lolping.app",
+     "productName": "lolPing",
+     "directories": { "output": "release", "buildResources": "build" },
+-    "files": ["out/**/*", "package.json"],
++    "files": ["out/**/*", "package.json", "LICENSE", "THIRD_PARTY_NOTICES.md"],
+     "win": {
+       "target": [{ "target": "nsis", "arch": ["x64"] }],
+       "icon": "build/icon.ico",
 @@ -59,7 +59,7 @@
        "oneClick": false,
        "perMachine": false,
