@@ -97,8 +97,13 @@ function start(): void {
   const aiKeys = new AiKeyStore(settingsDir());
   const assistant = new AiAssistant({
     settings: () => settings, enabled: () => enabled, keys: aiKeys,
-    capture: capturePingScreen,
+    capture: async (point) => {
+      overlays.setCaptureHidden(true);
+      try { await new Promise((resolve) => setTimeout(resolve, 60)); return await capturePingScreen(point); }
+      finally { overlays.setCaptureHidden(false); }
+    },
     show: () => openSettingsWindow('ai'), toast: (title, body) => overlays.toast(title, body),
+    bubble: (point, value) => overlays.aiBubble(point, value),
   });
   registerAiAssist(overlays, assistant);
   assistant.on('state', (state) => settingsWindow()?.webContents.send(SETTINGS_CH.aiState, state));

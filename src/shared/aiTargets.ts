@@ -1,6 +1,6 @@
 /** Fixed destinations: opening an AI never submits a prompt or runs a command. */
 export const AI_TARGETS = {
-  codex: { name: 'Codex', url: 'codex://launch' },
+  codex: { name: 'Codex', url: 'codex://threads/new' },
   cc: { name: 'Claude Code (CC)', url: 'claude://code' },
   deepseek: { name: 'DeepSeek (DS)', url: 'https://chat.deepseek.com/' },
 } as const;

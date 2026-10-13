@@ -1,5 +1,5 @@
 import type { EmoteArt, EmoteFile, EmoteRef, ImportResult } from './emotes';
-import type { AiRequest, AiResult, AiState } from './aiActions';
+import type { AiBubble, AiRequest, AiResult, AiState } from './aiActions';
 import type { PingId } from './pings';
 import type { Platform } from './platform';
 import type { HelperStatus, WheelKind } from './protocol';
@@ -32,6 +32,8 @@ export interface OverlayEvents {
   'emote:spawn': Point & { owner: string; art: EmoteArt; tag?: PingTag };
   'emote:clear': { owner: string };
   'toast:show': { title: string; body: string };
+  'ai:bubble': AiBubble;
+  'ai:clear': null;
 }
 
 export type OverlayChannel = keyof OverlayEvents;
@@ -39,6 +41,7 @@ export type OverlayChannel = keyof OverlayEvents;
 export const OVERLAY_CHANNELS: readonly OverlayChannel[] = [
   'overlay:settings', 'wheel:open', 'wheel:move', 'wheel:release', 'wheel:cancel', 'ping:spawn', 'emote:spawn', 'emote:clear',
   'toast:show',
+  'ai:bubble', 'ai:clear',
 ];
 
 /** overlay renderer → main: string[] of asset files that failed to load. */
@@ -47,6 +50,9 @@ export const OVERLAY_ASSETS = 'overlay:assets';
 export const OVERLAY_PINGED = 'overlay:pinged';
 /** overlay renderer → main: {ref, x, y} of an emote the wheel just placed, so it can be shared with the room. */
 export const OVERLAY_EMOTED = 'overlay:emoted';
+export const OVERLAY_MOUSE_PASS = 'overlay:mousePass';
+export const OVERLAY_CURSOR = 'overlay:cursor';
+export const OVERLAY_COPY = 'overlay:copy';
 
 export interface AppStatus {
   enabled: boolean;

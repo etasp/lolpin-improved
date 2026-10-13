@@ -1,7 +1,7 @@
-import { clipboard, shell } from 'electron';
+import { clipboard } from 'electron';
 import { EventEmitter } from 'node:events';
-import { apiEndpoint, type AiRequest, type AiResult, type AiState } from '../shared/aiActions';
-import { AI_TARGETS } from '../shared/aiTargets';
+import { AI_SKILLS, apiEndpoint, type AiBubble, type AiRequest, type AiResult, type AiState } from '../shared/aiActions';
+import { openAi } from './aiLaunch';
 import type { PingId } from '../shared/pings';
 import type { Settings } from '../shared/settings';
 import type { AiKeyStore } from './aiKeyStore';
@@ -13,16 +13,29 @@ export class AiAssistant extends EventEmitter {
   private opening = false;
   private request: AbortController | null = null;
   private point: SharedPing | undefined;
+  private bubbleActive = false;
+  private captureEpoch = 0;
   constructor(private readonly deps: {
     settings(): Settings; enabled(): boolean; keys: AiKeyStore;
     capture(point?: SharedPing): Promise<string>;
     show(): void; toast(title: string, body: string): void;
+    bubble(point: SharedPing | undefined, value: Omit<AiBubble, 'x' | 'y'>): void;
   }) { super(); }
   state(): AiState { return { ...this.value }; }
-  private push(): void { this.emit('state', this.state()); }
+  private push(): void {
+    this.emit('state', this.state());
+    const s = this.deps.settings();
+    if (this.bubbleActive && s.aiAssist && this.deps.enabled()) this.deps.bubble(this.point, {
+      pingId: this.value.ping, title: AI_SKILLS[this.value.ping].title,
+      body: this.value.busy ? '正在分析，请稍候…' : this.value.error || this.value.response || '暂无回答。',
+      ms: this.value.busy ? 0 : s.aiBubbleDurationS * 1000,
+    });
+  }
   cancel(): void {
+    this.captureEpoch++;
     this.request?.abort(); this.request = null;
-    this.value.busy = false; this.push();
+    if (this.bubbleActive && this.value.busy) this.value.error = '请求已取消。';
+    this.value.busy = false; this.push(); this.bubbleActive = false;
   }
   async ping(id: PingId, point?: SharedPing): Promise<void> {
     const s = this.deps.settings();
@@ -30,12 +43,13 @@ export class AiAssistant extends EventEmitter {
     const action = s.pingActions[id];
     if (action.kind === 'none') return;
     this.nextAllowedAt = Date.now() + 1500;
+    this.cancel();
     if (action.kind === 'reminder') { this.deps.toast('Ping 提醒', action.prompt); return; }
     const target = action.target === 'default' ? s.aiAssistTarget : action.target;
     if (action.kind === 'open-ai') {
       this.opening = true;
-      try { await shell.openExternal(AI_TARGETS[target].url); }
-      catch { this.deps.toast('未能打开 AI', '请检查应用是否已安装，或切换到 DeepSeek 网页版。'); }
+      try { await openAi(target); }
+      catch { this.deps.toast('未能显示 AI 窗口', '请从任务栏打开所选 AI 后重试，或切换到 DeepSeek 网页版。'); }
       finally { this.opening = false; }
       return;
     }
@@ -44,10 +58,38 @@ export class AiAssistant extends EventEmitter {
       catch { this.deps.toast('复制失败', '请重试。'); }
       return;
     }
-    this.cancel();
     const revision = this.value.revision + 1;
     this.value = { revision, ping: id, context: '', response: '', error: '', busy: false };
     this.point = point;
+    if (action.kind === 'api-bubble') {
+      this.bubbleActive = true;
+      if (!this.deps.keys.read()) {
+        this.value.error = '请先在设置 → AI 助手中配置 API 地址、密钥和模型。';
+        this.push(); return;
+      }
+      this.value.busy = true; this.push();
+      const epoch = this.captureEpoch;
+      try {
+        let screenshot: string | undefined, context = '';
+        if (s.aiBubbleContext === 'screen') screenshot = await this.deps.capture(point);
+        else {
+          const text = (await clipboard.readText()).trim();
+          if (!text || /^sk-[A-Za-z0-9_-]{8,}/i.test(text) || /^Bearer\s+\S+$/i.test(text)) throw new Error('请先复制待分析文字；密钥不能作为分析内容。');
+          context = text.slice(0, 20000);
+        }
+        if (epoch !== this.captureEpoch || !this.deps.settings().aiAssist || !this.deps.enabled()) return;
+        this.value.screenshot = screenshot; this.value.context = context;
+        this.value.busy = false;
+        const result = await this.run({ revision, context: this.value.context, includeScreenshot: s.aiBubbleContext === 'screen' });
+        if (!result.ok && epoch === this.captureEpoch) { this.value.error = result.error; this.push(); }
+      } catch (error) {
+        if (epoch !== this.captureEpoch) return;
+        this.value.busy = false;
+        this.value.error = error instanceof Error ? error.message : '无法读取上下文，请检查截图权限或剪贴板。';
+        this.push();
+      }
+      return;
+    }
     const context = await clipboard.readText().catch(() => '');
     if (this.value.revision !== revision || !this.deps.settings().aiAssist || !this.deps.enabled()) return;
     this.value.context = context.slice(0, 20000);
@@ -78,7 +120,7 @@ export class AiAssistant extends EventEmitter {
       this.opening = true;
       try {
         await clipboard.writeText(prompt);
-        await shell.openExternal(AI_TARGETS[action.target === 'default' ? s.aiAssistTarget : action.target].url);
+        await openAi(action.target === 'default' ? s.aiAssistTarget : action.target);
         return { ok: true };
       } catch { return { ok: false, error: '未能复制或打开 AI，请检查所选应用。' }; }
       finally { this.opening = false; }

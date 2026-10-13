@@ -1,24 +1,24 @@
 diff --git a/package-lock.json b/package-lock.json
-index ea3127c..80d72bd 100644
+index ea3127c..edc9b16 100644
 --- a/package-lock.json
 +++ b/package-lock.json
 @@ -1,12 +1,12 @@
  {
    "name": "lolping",
 -  "version": "0.5.1",
-+  "version": "0.5.2",
++  "version": "0.6.0",
    "lockfileVersion": 3,
    "requires": true,
    "packages": {
      "": {
        "name": "lolping",
 -      "version": "0.5.1",
-+      "version": "0.5.2",
++      "version": "0.6.0",
        "license": "MIT",
        "devDependencies": {
          "@fluentui/react-components": "9.74.9",
 diff --git a/package.json b/package.json
-index c08a347..0884c33 100644
+index c08a347..b1418d9 100644
 --- a/package.json
 +++ b/package.json
 @@ -1,7 +1,7 @@
@@ -26,7 +26,7 @@ index c08a347..0884c33 100644
    "name": "lolping",
    "productName": "lolPing",
 -  "version": "0.5.1",
-+  "version": "0.5.2",
++  "version": "0.6.0",
    "private": true,
    "description": "League of Legends style ping wheel for your Windows and macOS desktop",
    "author": "Danrui Meng (https://github.com/darrenprx)",
@@ -39,8 +39,22 @@ index c08a347..0884c33 100644
        "include": "build/installer.nsh"
      },
      "mac": {
+diff --git a/site/overlayShim.ts b/site/overlayShim.ts
+index 8c0163f..f40f61b 100644
+--- a/site/overlayShim.ts
++++ b/site/overlayShim.ts
+@@ -7,6 +7,9 @@ type Listener = (payload: never) => void;
+ const listeners = new Map<OverlayChannel, Listener[]>();
+ 
+ const api: OverlayApi = {
++  setMousePassThrough() {},
++  async getCursorLocal() { return null; },
++  copyText(text) { void navigator.clipboard?.writeText(text).catch(() => undefined); },
+   on(channel, cb) {
+     listeners.set(channel, [...(listeners.get(channel) ?? []), cb as Listener]);
+   },
 diff --git a/src/main/index.ts b/src/main/index.ts
-index b51b326..dc40c09 100644
+index b51b326..fcc7cf9 100644
 --- a/src/main/index.ts
 +++ b/src/main/index.ts
 @@ -1,4 +1,4 @@
@@ -60,15 +74,20 @@ index b51b326..dc40c09 100644
  import { resolveTarget, toShared } from './displayNumbers';
  import { EmoteLibrary, resolveEmoteArt } from './emoteLibrary';
  import { InputBridge } from './inputBridge';
-@@ -90,11 +94,21 @@ function start(): void {
+@@ -90,11 +94,26 @@ function start(): void {
  
    const overlays = new OverlayManager(overlaySettings(settings), (ref, remote) => resolveEmoteArt(ref, settings.customEmotes, remote));
    overlays.start();
 +  const aiKeys = new AiKeyStore(settingsDir());
 +  const assistant = new AiAssistant({
 +    settings: () => settings, enabled: () => enabled, keys: aiKeys,
-+    capture: capturePingScreen,
++    capture: async (point) => {
++      overlays.setCaptureHidden(true);
++      try { await new Promise((resolve) => setTimeout(resolve, 60)); return await capturePingScreen(point); }
++      finally { overlays.setCaptureHidden(false); }
++    },
 +    show: () => openSettingsWindow('ai'), toast: (title, body) => overlays.toast(title, body),
++    bubble: (point, value) => overlays.aiBubble(point, value),
 +  });
 +  registerAiAssist(overlays, assistant);
 +  assistant.on('state', (state) => settingsWindow()?.webContents.send(SETTINGS_CH.aiState, state));
@@ -83,7 +102,7 @@ index b51b326..dc40c09 100644
    function createUpdater(): Updater {
      const backend = IS_MAC
        ? new MacBackend({
-@@ -282,6 +296,7 @@ function start(): void {
+@@ -282,6 +301,7 @@ function start(): void {
      version: app.getVersion(),
      problems: [
        ...store.problems,
@@ -91,7 +110,7 @@ index b51b326..dc40c09 100644
        ...(store.emoteKeyClashed ? [text().problemEmoteKeyClash] : []),
        ...[...overlays.missingAssets].map((a) => text().missingAsset(a)),
      ],
-@@ -291,6 +306,7 @@ function start(): void {
+@@ -291,6 +311,7 @@ function start(): void {
    function setEnabled(on: boolean): void {
      if (on === enabled) return;
      enabled = on;
@@ -99,7 +118,7 @@ index b51b326..dc40c09 100644
      bridge.send(configCommand(store.get(), enabled)); // also refreshes the config re-sent after restarts
      const t = text();
      overlays.toast(on ? t.toastOn : t.toastOff, t.toastToggleHint(hotkeyLabel(store.get().toggleHotkey, PLATFORM)));
-@@ -323,6 +339,10 @@ function start(): void {
+@@ -323,6 +344,10 @@ function start(): void {
    store.on('change', (s: Settings) => {
      const previous = settings;
      settings = s;
@@ -110,7 +129,7 @@ index b51b326..dc40c09 100644
      bridge.send(configCommand(s, enabled));
      overlays.updateSettings(overlaySettings(s));
      settingsWindow()?.webContents.send(SETTINGS_CH.changed, s);
-@@ -344,6 +364,7 @@ function start(): void {
+@@ -344,6 +369,7 @@ function start(): void {
    });
  
    registerSettingsIpc({
@@ -118,7 +137,7 @@ index b51b326..dc40c09 100644
      store,
      library,
      getStatus: status,
-@@ -374,6 +395,16 @@ function start(): void {
+@@ -374,6 +400,16 @@ function start(): void {
        mute: (peer, on) => room.muteMember(peer, on),
        clipboardCode,
        copyCode: copyRoomCode,
@@ -135,7 +154,7 @@ index b51b326..dc40c09 100644
        retryInternet: () => relay.retryNow(),
      },
    });
-@@ -408,6 +439,8 @@ function start(): void {
+@@ -408,6 +444,8 @@ function start(): void {
    app.on('before-quit', (event) => {
      if (quitting) return;
      quitting = true;
@@ -144,8 +163,110 @@ index b51b326..dc40c09 100644
      event.preventDefault();
      updater?.stop(); // aborts a download and drops a check in flight; an install that is quitting the app is left alone
      room.quit(); // says bye, so the others see "left" instead of waiting for a timeout
+diff --git a/src/main/overlayManager.ts b/src/main/overlayManager.ts
+index 3a7f83c..60ded5f 100644
+--- a/src/main/overlayManager.ts
++++ b/src/main/overlayManager.ts
+@@ -1,8 +1,8 @@
+-import { BrowserWindow, ipcMain, screen, type Display, type WebContents } from 'electron';
++import { BrowserWindow, clipboard, ipcMain, screen, type Display, type WebContents } from 'electron';
+ import { EventEmitter } from 'node:events';
+ import { isEmoteRefShape, type EmoteArt, type EmoteRef } from '../shared/emotes';
+ import {
+-  OVERLAY_ASSETS, OVERLAY_EMOTED, OVERLAY_PINGED, type OverlayChannel, type OverlayEvents, type PingTag,
++  OVERLAY_ASSETS, OVERLAY_EMOTED, OVERLAY_PINGED, OVERLAY_MOUSE_PASS, OVERLAY_CURSOR, OVERLAY_COPY, type OverlayChannel, type OverlayEvents, type PingTag,
+ } from '../shared/ipc';
+ import { isPingId, type PingId } from '../shared/pings';
+ import type { HelperEvent, WheelKind } from '../shared/protocol';
+@@ -10,6 +10,7 @@ import type { OverlaySettings } from '../shared/settings';
+ import { physicalToLocal, type DisplayMap } from './coords';
+ import { numberDisplays, type NumberedDisplay } from './displayNumbers';
+ import { IS_MAC, loadPage, preloadPath } from './paths';
++import type { AiBubble } from '../shared/aiActions';
+ 
+ /** A ping the user just placed, in overlay-local CSS px: the room shares these. */
+ export interface SharedPing {
+@@ -48,6 +49,26 @@ export class OverlayManager extends EventEmitter {
+   }
+ 
+   start(): void {
++    ipcMain.on(OVERLAY_MOUSE_PASS, (event, pass: unknown) => {
++      if (typeof pass !== 'boolean' || this.displayOf(event.sender) === undefined) return;
++      const w = BrowserWindow.fromWebContents(event.sender);
++      if (!w || w.isDestroyed()) return;
++      const through = pass || !this.settings.aiAssist;
++      w.setFocusable(!through);
++      w.setIgnoreMouseEvents(through, { forward: true });
++      if (!through) { w.focus(); event.sender.focus(); }
++    });
++    ipcMain.handle(OVERLAY_CURSOR, (event) => {
++      if (this.displayOf(event.sender) === undefined) return null;
++      const w = BrowserWindow.fromWebContents(event.sender);
++      if (!w || w.isDestroyed()) return null;
++      const p = screen.getCursorScreenPoint(), b = w.getContentBounds();
++      return { x: p.x - b.x, y: p.y - b.y };
++    });
++    ipcMain.on(OVERLAY_COPY, (event, raw: unknown) => {
++      if (this.displayOf(event.sender) === undefined || typeof raw !== 'string' || !raw.length) return;
++      void clipboard.writeText(raw.slice(0, 20000)).catch(() => this.toast('复制失败', '请重试。'));
++    });
+     ipcMain.on(OVERLAY_ASSETS, (_event, missing: unknown) => {
+       if (!Array.isArray(missing)) return;
+       for (const m of missing) if (typeof m === 'string') this.missingAssets.add(m);
+@@ -75,7 +96,10 @@ export class OverlayManager extends EventEmitter {
+ 
+   updateSettings(s: OverlaySettings): void {
+     this.settings = s;
+-    for (const id of this.windows.keys()) this.send(id, 'overlay:settings', s);
++    for (const [id, w] of this.windows) {
++      if (!s.aiAssist) { w.setFocusable(false); w.setIgnoreMouseEvents(true, { forward: true }); }
++      this.send(id, 'overlay:settings', s);
++    }
+   }
+ 
+   handle(ev: HelperEvent): void {
+@@ -85,6 +109,7 @@ export class OverlayManager extends EventEmitter {
+         if (!p) return;
+         this.wheelDisplay = p.displayId;
+         this.wheelKind = ev.wheel;
++        this.raise(p.displayId);
+         this.send(p.displayId, 'wheel:open', { x: p.x, y: p.y, wheel: ev.wheel });
+         break;
+       }
+@@ -150,6 +175,22 @@ export class OverlayManager extends EventEmitter {
+     this.send(screen.getPrimaryDisplay().id, 'toast:show', { title, body });
+   }
+ 
++  aiBubble(point: SharedPing | undefined, value: Omit<AiBubble, 'x' | 'y'>): void {
++    const d = screen.getAllDisplays().find((d) => d.id === point?.displayId) ?? screen.getPrimaryDisplay();
++    for (const id of this.windows.keys()) if (id !== d.id) this.send(id, 'ai:clear', null);
++    this.raise(d.id);
++    this.send(d.id, 'ai:bubble', { ...value, x: point?.x ?? d.bounds.width / 2, y: point?.y ?? d.bounds.height / 2 });
++  }
++
++  setCaptureHidden(hidden: boolean): void {
++    for (const w of this.windows.values()) if (!w.isDestroyed()) w.setOpacity(hidden ? 0 : 1);
++  }
++
++  private raise(displayId: number): void {
++    const w = this.windows.get(displayId);
++    if (w && !w.isDestroyed()) { w.setAlwaysOnTop(true, 'screen-saver'); w.showInactive(); w.moveTop(); }
++  }
++
+   destroy(): void {
+     for (const w of this.windows.values()) if (!w.isDestroyed()) w.destroy();
+     this.windows.clear();
+@@ -219,7 +260,7 @@ export class OverlayManager extends EventEmitter {
+         spellcheck: false,
+       },
+     });
+-    win.setIgnoreMouseEvents(true);
++    win.setIgnoreMouseEvents(true, { forward: true });
+     win.setAlwaysOnTop(true, 'screen-saver');
+     if (IS_MAC) win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+     win.webContents.on('did-finish-load', () => win.webContents.send('overlay:settings', this.settings));
 diff --git a/src/main/settingsIpc.ts b/src/main/settingsIpc.ts
-index 669ba78..b9b1f4e 100644
+index 669ba78..42f61d4 100644
 --- a/src/main/settingsIpc.ts
 +++ b/src/main/settingsIpc.ts
 @@ -10,12 +10,16 @@ import { patchClashes, rendererPatch } from '../shared/settings';
@@ -155,7 +276,8 @@ index 669ba78..b9b1f4e 100644
 +import type { AiAssistant } from './aiAssistant';
 +import type { AiKeyStore } from './aiKeyStore';
  
- const PROJECT_URL = 'https://github.com/darrenprx/lolPing';
+-const PROJECT_URL = 'https://github.com/darrenprx/lolPing';
++const PROJECT_URL = 'https://github.com/etasp/lolpin-improved';
  /** Where "What's new" goes when no update is known. */
  export const LATEST_RELEASE_URL = `${PROJECT_URL}/releases/latest`;
  
@@ -194,6 +316,48 @@ index 669ba78..b9b1f4e 100644
    ipcMain.handle(SETTINGS_CH.roomRetryInternet, () => d.room.retryInternet());
  
    ipcMain.handle(SETTINGS_CH.updateGet, (): UpdateState | null => d.update?.state() ?? null);
+diff --git a/src/main/settingsStore.ts b/src/main/settingsStore.ts
+index bb74d34..bd84145 100644
+--- a/src/main/settingsStore.ts
++++ b/src/main/settingsStore.ts
+@@ -102,7 +102,16 @@ export class SettingsStore extends EventEmitter {
+         const tmp = `${this.file}.tmp`;
+         try {
+           await writeFile(tmp, data, 'utf8');
+-          await renameWithRetry(tmp, this.file);
++          try {
++            await renameWithRetry(tmp, this.file);
++          } catch (err) {
++            if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err;
++            // Some virtual filesystems mount the existing file separately from its directory.
++            // A rename cannot cross those mounts: retain the old JSON before writing in place.
++            if (existsSync(this.file)) await writeFile(join(this.dir, 'settings.bak.json'), readFileSync(this.file, 'utf8'), 'utf8');
++            await writeFile(this.file, data, 'utf8');
++            await rm(tmp, { force: true });
++          }
+         } catch (err) {
+           await rm(tmp, { force: true }).catch(() => undefined);
+           throw err;
+diff --git a/src/preload/overlay.ts b/src/preload/overlay.ts
+index 81e807d..a5a6e85 100644
+--- a/src/preload/overlay.ts
++++ b/src/preload/overlay.ts
+@@ -1,11 +1,14 @@
+ import { contextBridge, ipcRenderer } from 'electron';
+ import type { EmoteRef } from '../shared/emotes';
+ import {
+-  OVERLAY_ASSETS, OVERLAY_CHANNELS, OVERLAY_EMOTED, OVERLAY_PINGED, type OverlayChannel, type OverlayEvents,
++  OVERLAY_ASSETS, OVERLAY_CHANNELS, OVERLAY_EMOTED, OVERLAY_PINGED, OVERLAY_MOUSE_PASS, OVERLAY_CURSOR, OVERLAY_COPY, type OverlayChannel, type OverlayEvents,
+ } from '../shared/ipc';
+ import type { PingId } from '../shared/pings';
+ 
+ const api = {
++  setMousePassThrough(pass: boolean): void { ipcRenderer.send(OVERLAY_MOUSE_PASS, pass); },
++  getCursorLocal(): Promise<{ x: number; y: number } | null> { return ipcRenderer.invoke(OVERLAY_CURSOR); },
++  copyText(text: string): void { ipcRenderer.send(OVERLAY_COPY, text); },
+   on<C extends OverlayChannel>(channel: C, cb: (payload: OverlayEvents[C]) => void): void {
+     if (!OVERLAY_CHANNELS.includes(channel)) throw new Error(`unknown overlay channel: ${channel}`);
+     ipcRenderer.on(channel, (_event, payload: OverlayEvents[C]) => cb(payload));
 diff --git a/src/preload/settings.ts b/src/preload/settings.ts
 index 6769433..9f43113 100644
 --- a/src/preload/settings.ts
@@ -217,26 +381,59 @@ index 6769433..9f43113 100644
    onShowSection: (cb) => subscribe(SETTINGS_CH.showSection, cb),
    getUpdate: () => ipcRenderer.invoke(SETTINGS_CH.updateGet),
 diff --git a/src/renderer/overlay/main.ts b/src/renderer/overlay/main.ts
-index ee1b004..4bdd552 100644
+index ee1b004..38ff754 100644
 --- a/src/renderer/overlay/main.ts
 +++ b/src/renderer/overlay/main.ts
-@@ -59,6 +59,7 @@ function localArt(ref: EmoteRef): EmoteArt {
+@@ -14,9 +14,12 @@ import { spawnPing } from './pingFx';
+ import { SoundBank } from './soundBank';
+ import { showToast } from './toast';
+ import { Wheel, type WheelItem } from './wheel';
++import { hideAiBubble, showAiBubble } from './aiBubble';
+ 
+ const pingLayer = document.getElementById('pings') as HTMLElement;
+ const toastLayer = document.getElementById('toasts') as HTMLElement;
++const aiLayer = document.createElement('div');
++aiLayer.id = 'aiBubbles'; document.body.append(aiLayer);
+ const pingSvg = document.getElementById('wheel') as unknown as SVGSVGElement;
+ 
+ // The emote wheel is a second copy of the ping wheel's svg, and its emotes get a layer of their own above the pings.
+@@ -59,6 +62,8 @@ function localArt(ref: EmoteRef): EmoteArt {
  
  function applySettings(s: OverlaySettings): void {
    settings = s;
++  if (!s.aiAssist) hideAiBubble(aiLayer);
 +  pingWheel.setCenterLabel(s.aiAssist ? 'AI' : 'PING');
    pingWheel.setItems(pingsFor(s.wheel).map(pingItem));
    emoteWheel.setItems(s.emoteWheel.map(emoteItem));
  }
+@@ -99,6 +104,8 @@ window.overlay.on('ping:spawn', (p) => ping(pingById(p.id) ?? fallbackPing, p.x,
+ window.overlay.on('emote:spawn', (p) => emote(p.owner, p.art, p.x, p.y, p.tag));
+ window.overlay.on('emote:clear', (p) => stage.clear(p.owner));
+ window.overlay.on('toast:show', (t) => showToast(toastLayer, t.title, t.body));
++window.overlay.on('ai:bubble', (bubble) => { if (settings.aiAssist) showAiBubble(aiLayer, bubble); });
++window.overlay.on('ai:clear', () => hideAiBubble(aiLayer));
+ 
+ /** Resolves with `label` when the image at `url` doesn't load. */
+ const probe = (url: string, label: string): Promise<string | null> =>
 diff --git a/src/renderer/overlay/overlay.css b/src/renderer/overlay/overlay.css
-index b34585c..dd047f5 100644
+index b34585c..4d234f1 100644
 --- a/src/renderer/overlay/overlay.css
 +++ b/src/renderer/overlay/overlay.css
-@@ -109,3 +109,4 @@ html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background:
+@@ -109,3 +109,14 @@ html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background:
  }
  @keyframes toastIn { from { transform: translateY(24px); opacity: 0 } to { transform: none; opacity: 1 } }
  @keyframes toastOut { to { transform: translateY(12px); opacity: 0 } }
 +#wheel[data-ai-mode="true"] .centerTxt { fill: #56d43c; }
++/* Answer bubble interaction is adapted from the MIT reference in THIRD_PARTY_NOTICES.md. */
++#aiBubbles { position: fixed; inset: 0; pointer-events: none; z-index: 60; }
++.aiBubble { position: absolute; display: grid; grid-template-columns: 32px minmax(0,1fr) auto; gap: 12px; width: min(440px, calc(100vw - 24px)); box-sizing: border-box; padding: 16px; border-radius: 14px; border: 1px solid #58c5d9; background: rgba(13,25,35,.97); color: #eff8ff; box-shadow: 0 8px 30px #0008; pointer-events: auto; font: 14px/1.5 "Segoe UI", sans-serif; transition: opacity .24s; user-select: text; }
++.aiBubble img { width: 32px; height: 32px; object-fit: contain; }
++.aiBubbleBody { min-width: 0; }
++.aiBubble b { display: block; margin-bottom: 7px; color: #9cdeee; }
++.aiBubble small { display: block; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: min(380px, calc(100vh - 110px)); overflow-y: auto; user-select: text; }
++.aiCopyBtn { align-self: start; padding: 5px 8px; color: #e6f7ff; background: #274858; border: 1px solid #5d7f8e; border-radius: 7px; cursor: pointer; }
++.aiCopyBtn.ok { color: #a0ecb9; }
++.aiBubble.out { opacity: 0; pointer-events: none; }
 diff --git a/src/renderer/overlay/wheel.ts b/src/renderer/overlay/wheel.ts
 index 47da3e0..d5f50a1 100644
 --- a/src/renderer/overlay/wheel.ts
@@ -386,16 +583,43 @@ index be36c81..94d745d 100644
    languageDesc: '跟随 Windows，或手动选择',
    languageAuto: '跟随 Windows',
 diff --git a/src/shared/ipc.ts b/src/shared/ipc.ts
-index aad0ab8..5c63dd0 100644
+index aad0ab8..fcd91b9 100644
 --- a/src/shared/ipc.ts
 +++ b/src/shared/ipc.ts
 @@ -1,4 +1,5 @@
  import type { EmoteArt, EmoteFile, EmoteRef, ImportResult } from './emotes';
-+import type { AiRequest, AiResult, AiState } from './aiActions';
++import type { AiBubble, AiRequest, AiResult, AiState } from './aiActions';
  import type { PingId } from './pings';
  import type { Platform } from './platform';
  import type { HelperStatus, WheelKind } from './protocol';
-@@ -102,6 +103,17 @@ export interface SettingsApi {
+@@ -31,6 +32,8 @@ export interface OverlayEvents {
+   'emote:spawn': Point & { owner: string; art: EmoteArt; tag?: PingTag };
+   'emote:clear': { owner: string };
+   'toast:show': { title: string; body: string };
++  'ai:bubble': AiBubble;
++  'ai:clear': null;
+ }
+ 
+ export type OverlayChannel = keyof OverlayEvents;
+@@ -38,6 +41,7 @@ export type OverlayChannel = keyof OverlayEvents;
+ export const OVERLAY_CHANNELS: readonly OverlayChannel[] = [
+   'overlay:settings', 'wheel:open', 'wheel:move', 'wheel:release', 'wheel:cancel', 'ping:spawn', 'emote:spawn', 'emote:clear',
+   'toast:show',
++  'ai:bubble', 'ai:clear',
+ ];
+ 
+ /** overlay renderer → main: string[] of asset files that failed to load. */
+@@ -46,6 +50,9 @@ export const OVERLAY_ASSETS = 'overlay:assets';
+ export const OVERLAY_PINGED = 'overlay:pinged';
+ /** overlay renderer → main: {ref, x, y} of an emote the wheel just placed, so it can be shared with the room. */
+ export const OVERLAY_EMOTED = 'overlay:emoted';
++export const OVERLAY_MOUSE_PASS = 'overlay:mousePass';
++export const OVERLAY_CURSOR = 'overlay:cursor';
++export const OVERLAY_COPY = 'overlay:copy';
+ 
+ export interface AppStatus {
+   enabled: boolean;
+@@ -102,6 +109,17 @@ export interface SettingsApi {
    /** The room code on the clipboard, if there is one. The clipboard is read only when this is called. */
    clipboardRoomCode(): Promise<string | null>;
    copyRoomCode(): Promise<void>;
@@ -414,7 +638,7 @@ index aad0ab8..5c63dd0 100644
    retryInternet(): Promise<void>;
    /** The main process asks to scroll to a section (e.g. tray → Room settings…). */
 diff --git a/src/shared/settings.ts b/src/shared/settings.ts
-index ca1f55b..2ffb0ac 100644
+index ca1f55b..28456f0 100644
 --- a/src/shared/settings.ts
 +++ b/src/shared/settings.ts
 @@ -1,4 +1,6 @@
@@ -424,7 +648,7 @@ index ca1f55b..2ffb0ac 100644
  import {
    CUSTOM_NAME_MAX, MAX_CUSTOM_EMOTES, customHash, isCustomRef, normalizeClickEmote, normalizeEmoteWheel,
    type CustomEmote, type EmoteRef,
-@@ -42,6 +44,12 @@ export interface Settings {
+@@ -42,6 +44,14 @@ export interface Settings {
    muted: boolean;
    tickSound: boolean;
    launchAtStartup: boolean;
@@ -434,10 +658,12 @@ index ca1f55b..2ffb0ac 100644
 +  pingActions: PingActions;
 +  aiApiBaseUrl: string;
 +  aiApiModel: string;
++  aiBubbleContext: 'screen' | 'clipboard';
++  aiBubbleDurationS: number;
    language: LanguagePref;
    /** Shown under your pings on other people's screens. */
    displayName: string;
-@@ -93,6 +101,11 @@ export const DEFAULT_SETTINGS: Settings = {
+@@ -93,6 +103,13 @@ export const DEFAULT_SETTINGS: Settings = {
    muted: false,
    tickSound: true,
    launchAtStartup: false,
@@ -446,10 +672,20 @@ index ca1f55b..2ffb0ac 100644
 +  pingActions: defaultPingActions(),
 +  aiApiBaseUrl: 'https://api.deepseek.com',
 +  aiApiModel: 'deepseek-flash',
++  aiBubbleContext: 'screen',
++  aiBubbleDurationS: 20,
    language: 'auto',
    displayName: 'Player',
    tagColor: 0,
-@@ -123,7 +136,7 @@ export const LIMITS = {
+@@ -113,6 +130,7 @@ export const DEFAULT_SETTINGS: Settings = {
+ };
+ 
+ export const LIMITS = {
++  aiBubbleDurationS: { min: 5, max: 300, step: 1 },
+   dragThresholdPx: { min: 2, max: 40, step: 1 },
+   pingSizePx: { min: 60, max: 220, step: 1 },
+   pingDurationS: { min: 1, max: 8, step: 0.1 },
+@@ -123,7 +141,7 @@ export const LIMITS = {
  
  type NumKey = keyof typeof LIMITS;
  type BoolKey = 'enabledOnStart' | 'clickPing' | 'gameCheck' | 'muted' | 'tickSound' | 'launchAtStartup' | 'allowInternet' | 'rejoinRoom' | 'roomMuted'
@@ -458,7 +694,7 @@ index ca1f55b..2ffb0ac 100644
  
  const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
  const isVk = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 254;
-@@ -231,6 +244,11 @@ export function normalizeSettings(raw: unknown, platform: Platform = 'win', iden
+@@ -231,6 +249,13 @@ export function normalizeSettings(raw: unknown, platform: Platform = 'win', iden
      muted: bool(r.muted, 'muted'),
      tickSound: bool(r.tickSound, 'tickSound'),
      launchAtStartup: bool(r.launchAtStartup, 'launchAtStartup'),
@@ -467,10 +703,12 @@ index ca1f55b..2ffb0ac 100644
 +    pingActions: normalizePingActions(r.pingActions),
 +    aiApiBaseUrl: apiEndpoint(r.aiApiBaseUrl) ? (r.aiApiBaseUrl as string).trim() : DEFAULT_SETTINGS.aiApiBaseUrl,
 +    aiApiModel: typeof r.aiApiModel === 'string' && /^[a-zA-Z0-9._:/-]{1,100}$/.test(r.aiApiModel) ? r.aiApiModel : DEFAULT_SETTINGS.aiApiModel,
++    aiBubbleContext: r.aiBubbleContext === 'clipboard' ? 'clipboard' : 'screen',
++    aiBubbleDurationS: num(r.aiBubbleDurationS, 'aiBubbleDurationS'),
      language: (LANGUAGE_PREFS as readonly unknown[]).includes(r.language) ? (r.language as LanguagePref) : DEFAULT_SETTINGS.language,
      displayName: typeof r.displayName === 'string' ? sanitizeName(r.displayName, fallbackName) : fallbackName,
      tagColor: isTagColor(r.tagColor) ? r.tagColor : isTagColor(identity.color) ? identity.color : 0,
-@@ -280,12 +298,12 @@ export function triggerLabel(t: TriggerKey, lang: Lang = 'en', platform: Platfor
+@@ -280,12 +305,12 @@ export function triggerLabel(t: TriggerKey, lang: Lang = 'en', platform: Platfor
  
  export type OverlaySettings = Pick<
    Settings,
@@ -521,6 +759,71 @@ index 7b0e288..e67418e 100644
  
      b.lan.rebind();
      await until(() => b.lan.status === 'ok');
+diff --git a/tests/main/overlayManager.test.ts b/tests/main/overlayManager.test.ts
+index 9676331..f7f646c 100644
+--- a/tests/main/overlayManager.test.ts
++++ b/tests/main/overlayManager.test.ts
+@@ -1,10 +1,10 @@
+ import { beforeEach, describe, expect, it, vi } from 'vitest';
+ import type { EmoteArt } from '../../src/shared/emotes';
+-import { OVERLAY_EMOTED, OVERLAY_PINGED } from '../../src/shared/ipc';
++import { OVERLAY_EMOTED, OVERLAY_PINGED, OVERLAY_CURSOR, OVERLAY_COPY } from '../../src/shared/ipc';
+ import { DEFAULT_SETTINGS, overlaySettings } from '../../src/shared/settings';
+ 
+ const h = vi.hoisted(() => ({
+-  windows: [] as Array<{ x: number; webContents: { send: ReturnType<typeof vi.fn> } }>,
++  windows: [] as Array<{ x: number; webContents: { send: ReturnType<typeof vi.fn> }; moveTop: ReturnType<typeof vi.fn> }>,
+   handlers: new Map<string, (event: unknown, raw: unknown) => void>(),
+ }));
+ 
+@@ -15,7 +15,12 @@ vi.mock('electron', async () => {
+       return (h.windows as unknown as FakeWindow[]).find((w) => w.webContents === wc) ?? null;
+     }
+     x: number;
+-    webContents = Object.assign(new Emitter(), { send: vi.fn() });
++    webContents = Object.assign(new Emitter(), { send: vi.fn(), focus: vi.fn() });
++    moveTop = vi.fn();
++    setFocusable = vi.fn();
++    focus = vi.fn();
++    setOpacity = vi.fn();
++    getContentBounds(): { x: number; y: number } { return { x: this.x, y: 0 }; }
+     constructor(opts: { x: number }) {
+       super();
+       this.x = opts.x;
+@@ -37,10 +42,11 @@ vi.mock('electron', async () => {
+   const screen = Object.assign(new Emitter(), {
+     getAllDisplays: () => displays,
+     getPrimaryDisplay: () => displays[0],
++    getCursorScreenPoint: () => ({ x: 2100, y: 300 }),
+     dipToScreenRect: (_win: unknown, r: unknown) => r,
+   });
+-  const ipcMain = { on: (channel: string, fn: (event: unknown, raw: unknown) => void) => h.handlers.set(channel, fn) };
+-  return { BrowserWindow: FakeWindow, ipcMain, screen };
++  const ipcMain = { on: (channel: string, fn: (event: unknown, raw: unknown) => void) => h.handlers.set(channel, fn), handle: (channel: string, fn: (event: unknown, raw: unknown) => void) => h.handlers.set(channel, fn) };
++  return { BrowserWindow: FakeWindow, ipcMain, screen, clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } };
+ });
+ 
+ vi.mock('../../src/main/paths', () => ({
+@@ -69,8 +75,19 @@ beforeEach(async () => {
+ });
+ 
+ describe('OverlayManager wheels', () => {
++  it('limits bubble cursor and copy IPC to this manager\'s own overlay windows', async () => {
++    const { clipboard } = await import('electron');
++    const copy = h.handlers.get(OVERLAY_COPY)!, cursor = h.handlers.get(OVERLAY_CURSOR)!;
++    copy({ sender: {} }, 'not from an overlay');
++    expect(clipboard.writeText).not.toHaveBeenCalled();
++    expect(cursor({ sender: {} }, undefined)).toBeNull();
++    expect(cursor({ sender: h.windows[1].webContents }, undefined)).toEqual({ x: 180, y: 300 });
++    copy({ sender: h.windows[0].webContents }, 'answer');
++    expect(clipboard.writeText).toHaveBeenCalledExactlyOnceWith('answer');
++  });
+   it('forwards the open wheel\'s kind with every move and the release', () => {
+     mgr.handle({ type: 'wheelOpen', x: 100, y: 200, wheel: 'emote' });
++    expect(h.windows[0].moveTop).toHaveBeenCalledOnce();
+     mgr.handle({ type: 'wheelMove', x: 110, y: 210, wheel: 'emote' });
+     mgr.handle({ type: 'wheelRelease', x: 120, y: 220, wheel: 'emote' });
+     expect(sent(0)).toEqual([
 diff --git a/tests/main/relayRoom.test.ts b/tests/main/relayRoom.test.ts
 index 2f8154c..c2aa32b 100644
 --- a/tests/main/relayRoom.test.ts
@@ -535,6 +838,73 @@ index 2f8154c..c2aa32b 100644
  
      b.room.leave();
      await until(() => a.toasts.some((t) => t.kind === 'left'));
+diff --git a/tests/main/settingsIpc.test.ts b/tests/main/settingsIpc.test.ts
+index 720d481..43d9d25 100644
+--- a/tests/main/settingsIpc.test.ts
++++ b/tests/main/settingsIpc.test.ts
+@@ -194,13 +194,13 @@ describe('update IPC', () => {
+       h.opened.length = 0;
+       registerWith(fakeUpdate(state, null));
+       await call(SETTINGS_CH.updateOpenRelease);
+-      expect(h.opened, state.phase).toEqual(['https://github.com/darrenprx/lolPing/releases/latest']);
++      expect(h.opened, state.phase).toEqual(['https://github.com/etasp/lolpin-improved/releases/latest']);
+     }
+   });
+ 
+   it('openReleasePage never opens a link that is not a web page', async () => {
+     registerWith(fakeUpdate(AVAILABLE, 'file:///C:/Windows/System32/calc.exe'));
+     await call(SETTINGS_CH.updateOpenRelease);
+-    expect(h.opened).toEqual(['https://github.com/darrenprx/lolPing/releases/latest']);
++    expect(h.opened).toEqual(['https://github.com/etasp/lolpin-improved/releases/latest']);
+   });
+ });
+diff --git a/tests/main/settingsStore.test.ts b/tests/main/settingsStore.test.ts
+index 001710c..93788a5 100644
+--- a/tests/main/settingsStore.test.ts
++++ b/tests/main/settingsStore.test.ts
+@@ -1,12 +1,17 @@
+ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
++import { rename } from 'node:fs/promises';
+ import { describe, expect, it, vi } from 'vitest';
+ import { SettingsStore } from '../../src/main/settingsStore';
+ import { DEFAULT_SETTINGS, type Settings } from '../../src/shared/settings';
+ 
+ const tempDir = () => mkdtempSync(join(tmpdir(), 'lolping-'));
+ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
++vi.mock('node:fs/promises', async (load) => {
++  const actual = await load<typeof import('node:fs/promises')>();
++  return { ...actual, rename: vi.fn(actual.rename) };
++});
+ /** Waits for the save load() scheduled on its own to reach disk: a fixed sleep raced slow CI runners. */
+ const savedTagColor = (dir: string, color: number) =>
+   vi.waitFor(() => expect(JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8')).tagColor).toBe(color), { timeout: 3000 });
+@@ -119,6 +124,24 @@ describe('SettingsStore', () => {
+     expect(again.clickPing).toBe(true);
+   });
+ 
++  it('persists settings on EXDEV while keeping the previous JSON as a backup', async () => {
++    const dir = tempDir();
++    const previous = JSON.stringify({ ...DEFAULT_SETTINGS, volume: 20 });
++    writeFileSync(join(dir, 'settings.json'), previous);
++    const store = new SettingsStore(dir);
++    store.load(); store.update({ volume: 44, gameCheck: false });
++    const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
++    vi.mocked(rename).mockImplementation(async (from, to) => {
++      if (to === store.file) throw Object.assign(new Error('different mount'), { code: 'EXDEV' });
++      return actual.rename(from, to);
++    });
++    try { await store.flush(); } finally { vi.mocked(rename).mockImplementation(actual.rename); }
++    expect(store.problems).toEqual([]);
++    expect(JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8'))).toMatchObject({ volume: 44, gameCheck: false });
++    expect(readFileSync(join(dir, 'settings.bak.json'), 'utf8')).toBe(previous);
++    expect(existsSync(join(dir, 'settings.json.tmp'))).toBe(false);
++  });
++
+   it('debounces writes and keeps the last value', async () => {
+     const dir = tempDir();
+     const store = new SettingsStore(dir, 60);
 diff --git a/tests/shared/settings.test.ts b/tests/shared/settings.test.ts
 index cad01d0..ddebbc4 100644
 --- a/tests/shared/settings.test.ts
@@ -548,6 +918,18 @@ index cad01d0..ddebbc4 100644
        wheel: ['danger', 'push', 'omw', 'allin', 'assist', 'needvision', 'missing', 'enemyvision'], clickPingId: 'generic',
        emoteWheel: [...DEFAULT_EMOTE_WHEEL], clickEmoteId: DEFAULT_CLICK_EMOTE, emoteSizePx: 150, emoteSound: true, customEmotes: [],
      });
+diff --git a/THIRD_PARTY_NOTICES.md b/THIRD_PARTY_NOTICES.md
+new file mode 100644
+--- /dev/null
++++ b/THIRD_PARTY_NOTICES.md
+@@ -0,0 +1,7 @@
++# 来源与许可
++
++本项目基于 Danrui Meng / darrenprx 的 [lolPing](https://github.com/darrenprx/lolPing)，保留原作 MIT 许可证和署名。游戏图标、动画、纹理和音效属于 Riot Games，不受 MIT 许可证覆盖。
++
++屏幕 AI 气泡的悬停保留、文字选择及复制交互改编自 [renyuzhu1-jpg/LOLping-AI-Assistant](https://github.com/renyuzhu1-jpg/LOLping-AI-Assistant)，固定参考提交 `a58aefe4f972415236ce4b26ce268328f2f4ea4a`，文件 `src/renderer/overlay/aiBubble.ts`。该项目的源码沿用 MIT 许可证及 `Copyright (c) 2026 Danrui Meng`，完整许可证见本仓库 LICENSE。
++
++本项目的加密密钥存储、娱乐 / AI 模式、Codex / CC / DS 呼出、API 确认面板和请求控制在既有定制版基础上扩展；保留参考项目链接用于说明功能来源。
 diff --git a/src/main/aiAssist.ts b/src/main/aiAssist.ts
 new file mode 100644
 --- /dev/null
@@ -567,11 +949,11 @@ diff --git a/src/main/aiAssistant.ts b/src/main/aiAssistant.ts
 new file mode 100644
 --- /dev/null
 +++ b/src/main/aiAssistant.ts
-@@ -0,0 +1,117 @@
-+import { clipboard, shell } from 'electron';
+@@ -0,0 +1,159 @@
++import { clipboard } from 'electron';
 +import { EventEmitter } from 'node:events';
-+import { apiEndpoint, type AiRequest, type AiResult, type AiState } from '../shared/aiActions';
-+import { AI_TARGETS } from '../shared/aiTargets';
++import { AI_SKILLS, apiEndpoint, type AiBubble, type AiRequest, type AiResult, type AiState } from '../shared/aiActions';
++import { openAi } from './aiLaunch';
 +import type { PingId } from '../shared/pings';
 +import type { Settings } from '../shared/settings';
 +import type { AiKeyStore } from './aiKeyStore';
@@ -583,16 +965,29 @@ new file mode 100644
 +  private opening = false;
 +  private request: AbortController | null = null;
 +  private point: SharedPing | undefined;
++  private bubbleActive = false;
++  private captureEpoch = 0;
 +  constructor(private readonly deps: {
 +    settings(): Settings; enabled(): boolean; keys: AiKeyStore;
 +    capture(point?: SharedPing): Promise<string>;
 +    show(): void; toast(title: string, body: string): void;
++    bubble(point: SharedPing | undefined, value: Omit<AiBubble, 'x' | 'y'>): void;
 +  }) { super(); }
 +  state(): AiState { return { ...this.value }; }
-+  private push(): void { this.emit('state', this.state()); }
++  private push(): void {
++    this.emit('state', this.state());
++    const s = this.deps.settings();
++    if (this.bubbleActive && s.aiAssist && this.deps.enabled()) this.deps.bubble(this.point, {
++      pingId: this.value.ping, title: AI_SKILLS[this.value.ping].title,
++      body: this.value.busy ? '正在分析，请稍候…' : this.value.error || this.value.response || '暂无回答。',
++      ms: this.value.busy ? 0 : s.aiBubbleDurationS * 1000,
++    });
++  }
 +  cancel(): void {
++    this.captureEpoch++;
 +    this.request?.abort(); this.request = null;
-+    this.value.busy = false; this.push();
++    if (this.bubbleActive && this.value.busy) this.value.error = '请求已取消。';
++    this.value.busy = false; this.push(); this.bubbleActive = false;
 +  }
 +  async ping(id: PingId, point?: SharedPing): Promise<void> {
 +    const s = this.deps.settings();
@@ -600,12 +995,13 @@ new file mode 100644
 +    const action = s.pingActions[id];
 +    if (action.kind === 'none') return;
 +    this.nextAllowedAt = Date.now() + 1500;
++    this.cancel();
 +    if (action.kind === 'reminder') { this.deps.toast('Ping 提醒', action.prompt); return; }
 +    const target = action.target === 'default' ? s.aiAssistTarget : action.target;
 +    if (action.kind === 'open-ai') {
 +      this.opening = true;
-+      try { await shell.openExternal(AI_TARGETS[target].url); }
-+      catch { this.deps.toast('未能打开 AI', '请检查应用是否已安装，或切换到 DeepSeek 网页版。'); }
++      try { await openAi(target); }
++      catch { this.deps.toast('未能显示 AI 窗口', '请从任务栏打开所选 AI 后重试，或切换到 DeepSeek 网页版。'); }
 +      finally { this.opening = false; }
 +      return;
 +    }
@@ -614,10 +1010,38 @@ new file mode 100644
 +      catch { this.deps.toast('复制失败', '请重试。'); }
 +      return;
 +    }
-+    this.cancel();
 +    const revision = this.value.revision + 1;
 +    this.value = { revision, ping: id, context: '', response: '', error: '', busy: false };
 +    this.point = point;
++    if (action.kind === 'api-bubble') {
++      this.bubbleActive = true;
++      if (!this.deps.keys.read()) {
++        this.value.error = '请先在设置 → AI 助手中配置 API 地址、密钥和模型。';
++        this.push(); return;
++      }
++      this.value.busy = true; this.push();
++      const epoch = this.captureEpoch;
++      try {
++        let screenshot: string | undefined, context = '';
++        if (s.aiBubbleContext === 'screen') screenshot = await this.deps.capture(point);
++        else {
++          const text = (await clipboard.readText()).trim();
++          if (!text || /^sk-[A-Za-z0-9_-]{8,}/i.test(text) || /^Bearer\s+\S+$/i.test(text)) throw new Error('请先复制待分析文字；密钥不能作为分析内容。');
++          context = text.slice(0, 20000);
++        }
++        if (epoch !== this.captureEpoch || !this.deps.settings().aiAssist || !this.deps.enabled()) return;
++        this.value.screenshot = screenshot; this.value.context = context;
++        this.value.busy = false;
++        const result = await this.run({ revision, context: this.value.context, includeScreenshot: s.aiBubbleContext === 'screen' });
++        if (!result.ok && epoch === this.captureEpoch) { this.value.error = result.error; this.push(); }
++      } catch (error) {
++        if (epoch !== this.captureEpoch) return;
++        this.value.busy = false;
++        this.value.error = error instanceof Error ? error.message : '无法读取上下文，请检查截图权限或剪贴板。';
++        this.push();
++      }
++      return;
++    }
 +    const context = await clipboard.readText().catch(() => '');
 +    if (this.value.revision !== revision || !this.deps.settings().aiAssist || !this.deps.enabled()) return;
 +    this.value.context = context.slice(0, 20000);
@@ -648,7 +1072,7 @@ new file mode 100644
 +      this.opening = true;
 +      try {
 +        await clipboard.writeText(prompt);
-+        await shell.openExternal(AI_TARGETS[action.target === 'default' ? s.aiAssistTarget : action.target].url);
++        await openAi(action.target === 'default' ? s.aiAssistTarget : action.target);
 +        return { ok: true };
 +      } catch { return { ok: false, error: '未能复制或打开 AI，请检查所选应用。' }; }
 +      finally { this.opening = false; }
@@ -712,6 +1136,63 @@ new file mode 100644
 +  }
 +  clear(): void { rmSync(this.file, { force: true }); }
 +}
+diff --git a/src/main/aiLaunch.ts b/src/main/aiLaunch.ts
+new file mode 100644
+--- /dev/null
++++ b/src/main/aiLaunch.ts
+@@ -0,0 +1,52 @@
++import { shell } from 'electron';
++import { execFile } from 'node:child_process';
++import { join } from 'node:path';
++import { AI_TARGETS, type AiTarget } from '../shared/aiTargets';
++
++// Windows can accept a deep link while keeping the requesting app in front.
++// Restore and activate only the Codex desktop window; never send keystrokes.
++const CODEX_FOCUS = String.raw`
++$ErrorActionPreference = 'Stop'
++Add-Type @'
++using System;
++using System.Runtime.InteropServices;
++public static class PingAiFocus {
++    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
++    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, IntPtr process);
++    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
++    [DllImport("user32.dll")] static extern bool AttachThreadInput(uint a, uint b, bool attach);
++    [DllImport("user32.dll")] static extern bool IsIconic(IntPtr hwnd);
++    [DllImport("user32.dll")] static extern bool ShowWindowAsync(IntPtr hwnd, int command);
++    [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr hwnd);
++    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
++    public static bool Raise(IntPtr hwnd) {
++        uint current=GetCurrentThreadId(), foreground=GetWindowThreadProcessId(GetForegroundWindow(),IntPtr.Zero);
++        bool attached=current!=foreground && AttachThreadInput(current,foreground,true);
++        try {
++            if(IsIconic(hwnd)) ShowWindowAsync(hwnd,9);
++            BringWindowToTop(hwnd); SetForegroundWindow(hwnd);
++            return GetForegroundWindow()==hwnd;
++        } finally { if(attached) AttachThreadInput(current,foreground,false); }
++    }
++}
++'@
++for ($attempt=0; $attempt -lt 10; $attempt++) {
++    $target = Get-Process -Name codex,ChatGPT -ErrorAction SilentlyContinue | Where-Object {
++        $_.MainWindowHandle -ne 0 -and ($_.ProcessName -eq 'codex' -or $_.Path -like '*\OpenAI.Codex_*\*' -or $_.Path -like '*\Codex\*')
++    } | Select-Object -First 1
++    if ($target -and [PingAiFocus]::Raise($target.MainWindowHandle)) { 'True'; exit 0 }
++    Start-Sleep -Milliseconds 200
++}
++'False'
++`;
++
++export async function openAi(target: AiTarget): Promise<void> {
++  await shell.openExternal(AI_TARGETS[target].url);
++  if (target !== 'codex' || process.platform !== 'win32') return;
++  const powershell = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
++  const focused = await new Promise<string>((resolve, reject) => {
++    execFile(powershell, ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', CODEX_FOCUS],
++      { windowsHide: true, timeout: 8000 }, (error, stdout) => error ? reject(error) : resolve(stdout));
++  });
++  if (focused.trim() !== 'True') throw new Error('Codex window could not be activated');
++}
 diff --git a/src/main/aiScreen.ts b/src/main/aiScreen.ts
 new file mode 100644
 --- /dev/null
@@ -734,11 +1215,340 @@ new file mode 100644
 +  const y = Math.max(0, Math.min(size.height - height, Math.round((point?.y ?? display.bounds.height / 2) * sy - height / 2)));
 +  return `data:image/jpeg;base64,${image.crop({ x, y, width, height }).toJPEG(85).toString('base64')}`;
 +}
+diff --git a/src/renderer/overlay/aiBubble.ts b/src/renderer/overlay/aiBubble.ts
+new file mode 100644
+--- /dev/null
++++ b/src/renderer/overlay/aiBubble.ts
+@@ -0,0 +1,324 @@
++// Adapted from renyuzhu1-jpg/LOLping-AI-Assistant at a58aefe (MIT).
++// Attribution and license: THIRD_PARTY_NOTICES.md.
++import { textureUrl, type PingId } from '../../shared/pings';
++
++let dismissTimer: ReturnType<typeof setTimeout> | null = null;
++let outTimer: ReturnType<typeof setTimeout> | null = null;
++let watchTimer: ReturnType<typeof setInterval> | null = null;
++let hovered = false;
++/** True while the user is drag-selecting text inside the bubble. */
++let selecting = false;
++/** ms for the current bubble; <= 0 means stay until replaced. */
++let activeMs = 0;
++let activeEl: HTMLElement | null = null;
++/** Last pointer position in the overlay. -1 = none yet. */
++let lastX = -1;
++let lastY = -1;
++let tracking = false;
++/** Mirrors overlay.setMousePassThrough — avoid spamming IPC. */
++let passThrough = true;
++
++function clearDismissTimers(): void {
++  if (dismissTimer) clearTimeout(dismissTimer);
++  if (outTimer) clearTimeout(outTimer);
++  dismissTimer = null;
++  outTimer = null;
++}
++
++function stopWatch(): void {
++  if (watchTimer) clearInterval(watchTimer);
++  watchTimer = null;
++}
++
++function setPassThrough(pass: boolean): void {
++  if (passThrough === pass) return;
++  passThrough = pass;
++  window.overlay.setMousePassThrough(pass);
++}
++
++function pointOver(el: HTMLElement, x: number, y: number): boolean {
++  if (x < 0 || y < 0) return false;
++  const r = el.getBoundingClientRect();
++  if (r.width < 2 || r.height < 2) return false;
++  const pad = 8;
++  return x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
++}
++
++/** Click-through off while hovering / selecting so text can be drag-copied. */
++function syncMouseMode(): void {
++  const needClicks = !!(activeEl && (hovered || selecting));
++  setPassThrough(!needClicks);
++}
++
++function applyHover(next: boolean): void {
++  if (hovered === next) {
++    syncMouseMode();
++    return;
++  }
++  hovered = next;
++  syncMouseMode();
++  if (!activeEl) return;
++  if (next) {
++    clearDismissTimers();
++    activeEl.classList.remove('out');
++  } else if (!selecting) {
++    scheduleDismiss(activeEl);
++  }
++}
++
++/** Hit-test using last known coords (mousemove and/or OS cursor poll). */
++function syncHoverFromPointer(): void {
++  if (!activeEl) {
++    hovered = false;
++    selecting = false;
++    syncMouseMode();
++    return;
++  }
++  if (selecting) {
++    if (!hovered) {
++      hovered = true;
++      clearDismissTimers();
++      activeEl.classList.remove('out');
++    }
++    syncMouseMode();
++    return;
++  }
++  applyHover(pointOver(activeEl, lastX, lastY));
++}
++
++async function refreshCursorAndSync(): Promise<void> {
++  try {
++    const p = await window.overlay.getCursorLocal();
++    if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) {
++      lastX = p.x;
++      lastY = p.y;
++    }
++  } catch {
++    // keep lastX/Y
++  }
++  if (activeEl) syncHoverFromPointer();
++}
++
++function startWatch(): void {
++  stopWatch();
++  watchTimer = setInterval(() => {
++    void refreshCursorAndSync();
++  }, 100);
++}
++
++function onPointerMove(e: MouseEvent): void {
++  lastX = e.clientX;
++  lastY = e.clientY;
++  if (activeEl) syncHoverFromPointer();
++}
++
++function onPointerUp(): void {
++  if (!selecting) return;
++  selecting = false;
++  void refreshCursorAndSync().then(() => {
++    if (!hovered && activeEl) scheduleDismiss(activeEl);
++  });
++}
++
++function bubbleBodyText(el: HTMLElement | null): string {
++  if (!el) return '';
++  const small = el.querySelector('small');
++  return (small?.textContent ?? '').trim();
++}
++
++/** Copy current selection, or the whole reply body if nothing is selected. */
++function copyBubbleText(): boolean {
++  const sel = window.getSelection()?.toString() ?? '';
++  const text = sel.trim() || bubbleBodyText(activeEl);
++  if (!text) return false;
++  window.overlay.copyText(text);
++  return true;
++}
++
++function flashCopyBtn(btn: HTMLButtonElement): void {
++  const zh = /^zh/i.test(navigator.language);
++  const prev = btn.textContent;
++  btn.textContent = zh ? '已复制' : 'Copied';
++  btn.classList.add('ok');
++  window.setTimeout(() => {
++    btn.textContent = prev;
++    btn.classList.remove('ok');
++  }, 1200);
++}
++
++function onKeyDown(e: KeyboardEvent): void {
++  if (!activeEl || passThrough) return;
++  const mod = e.ctrlKey || e.metaKey;
++  if (!mod) return;
++  if (e.key === 'c' || e.key === 'C') {
++    if (copyBubbleText()) {
++      e.preventDefault();
++      e.stopPropagation();
++      const btn = activeEl.querySelector('.aiCopyBtn') as HTMLButtonElement | null;
++      if (btn) flashCopyBtn(btn);
++    }
++  } else if (e.key === 'a' || e.key === 'A') {
++    // Select the reply body for easier Ctrl+C.
++    const small = activeEl.querySelector('small');
++    if (!small) return;
++    e.preventDefault();
++    const range = document.createRange();
++    range.selectNodeContents(small);
++    const sel = window.getSelection();
++    sel?.removeAllRanges();
++    sel?.addRange(range);
++  }
++}
++
++function ensurePointerTracking(): void {
++  if (tracking) return;
++  tracking = true;
++  window.addEventListener('mousemove', onPointerMove, true);
++  window.addEventListener('mouseup', onPointerUp, true);
++  window.addEventListener('keydown', onKeyDown, true);
++}
++
++function clearBubble(el: HTMLElement): void {
++  if (activeEl === el) {
++    activeEl = null;
++    hovered = false;
++    selecting = false;
++    stopWatch();
++    syncMouseMode();
++  }
++  el.remove();
++}
++
++function beginDismiss(el: HTMLElement): void {
++  if ((hovered || selecting) && activeEl === el) return;
++  el.classList.add('out');
++  outTimer = setTimeout(() => {
++    if ((hovered || selecting) && activeEl === el) {
++      el.classList.remove('out');
++      return;
++    }
++    clearBubble(el);
++  }, 240);
++}
++
++function scheduleDismiss(el: HTMLElement): void {
++  clearDismissTimers();
++  if (activeMs <= 0) return; // sticky until replaced
++  if ((hovered || selecting) && activeEl === el) return;
++  const ms = activeMs;
++  dismissTimer = setTimeout(() => {
++    void (async () => {
++      // Re-check real cursor — don’t dismiss if the user is still on the bubble.
++      await refreshCursorAndSync();
++      if (hovered || selecting || activeEl !== el) return;
++      beginDismiss(el);
++    })();
++  }, ms);
++}
++
++/**
++ * League-style coach bubble near a ping.
++ * - `ms <= 0`: stay until the next `showAiBubble` replaces it.
++ * - Hover keeps it on screen; leaving restarts the dismiss timer (`ms`).
++ * - While hovered, the overlay takes clicks/focus so text can be selected and Ctrl+C copied.
++ */
++export function showAiBubble(
++  layer: HTMLElement,
++  opts: { x: number; y: number; title: string; body: string; pingId: PingId; ms: number },
++): void {
++  clearDismissTimers();
++  ensurePointerTracking();
++  layer.querySelectorAll('.aiBubble').forEach((n) => n.remove());
++  activeEl = null;
++  hovered = false;
++  selecting = false;
++  syncMouseMode();
++
++  const el = document.createElement('div');
++  el.className = 'aiBubble';
++  el.style.left = `${opts.x}px`;
++  el.style.top = `${opts.y}px`;
++  el.tabIndex = -1; // allow programmatic focus for Ctrl+C
++  activeMs = opts.ms;
++  activeEl = el;
++
++  const icon = document.createElement('img');
++  icon.src = textureUrl(opts.pingId === 'generic' ? 'generic_ping' : iconFor(opts.pingId));
++  icon.alt = '';
++  icon.draggable = false;
++
++  const text = document.createElement('div');
++  text.className = 'aiBubbleBody';
++  const b = document.createElement('b');
++  b.textContent = opts.title;
++  const small = document.createElement('small');
++  small.textContent = opts.body;
++  text.append(b, small);
++
++  const zh = /^zh/i.test(navigator.language);
++  const copyBtn = document.createElement('button');
++  copyBtn.type = 'button';
++  copyBtn.className = 'aiCopyBtn';
++  copyBtn.textContent = zh ? '复制' : 'Copy';
++  copyBtn.title = zh ? '复制全文（也可拖选后 Ctrl+C）' : 'Copy all (or select + Ctrl+C)';
++  copyBtn.addEventListener('mousedown', (e) => {
++    // Don’t start a text-drag selection when pressing the button.
++    e.stopPropagation();
++  });
++  copyBtn.addEventListener('click', (e) => {
++    e.preventDefault();
++    e.stopPropagation();
++    selecting = false;
++    applyHover(true);
++    // Prefer selection if the user highlighted something; else copy full body.
++    if (copyBubbleText()) flashCopyBtn(copyBtn);
++  });
++
++  el.append(icon, text, copyBtn);
++  layer.append(el);
++  const bounds = el.getBoundingClientRect();
++  el.style.left = `${Math.max(12, Math.min(window.innerWidth - bounds.width - 12, opts.x + 24))}px`;
++  el.style.top = `${Math.max(12, Math.min(window.innerHeight - bounds.height - 12, opts.y + 24))}px`;
++
++  el.addEventListener('mousedown', (e) => {
++    if (e.button !== 0) return;
++    if ((e.target as HTMLElement | null)?.closest?.('.aiCopyBtn')) return;
++    selecting = true;
++    applyHover(true);
++    clearDismissTimers();
++    el.classList.remove('out');
++    // Keep focus so the next Ctrl+C reaches this document.
++    el.focus({ preventScroll: true });
++  });
++  el.addEventListener('mouseenter', () => applyHover(true));
++  // Do not trust mouseleave alone on click-through windows — the watch poll decides leave.
++
++  startWatch();
++  void refreshCursorAndSync().then(() => {
++    if (activeEl !== el) return;
++    if (!hovered) scheduleDismiss(el);
++  });
++}
++
++export function hideAiBubble(layer: HTMLElement): void {
++  clearDismissTimers(); stopWatch();
++  if (activeEl) clearBubble(activeEl);
++  layer.querySelectorAll('.aiBubble').forEach((el) => el.remove());
++}
++
++function iconFor(id: PingId): string {
++  const map: Partial<Record<PingId, string>> = {
++    danger: 'pingwheel_retreatrender',
++    push: 'push',
++    omw: 'omw',
++    allin: 'all_in',
++    assist: 'assist_me',
++    needvision: 'need_vision',
++    missing: 'enemy_missing',
++    enemyvision: 'enemy_vision',
++    bait: 'pingwheel_baitrender',
++    visioncleared: 'vision_cleared',
++    generic: 'generic_ping',
++  };
++  return map[id] ?? 'generic_ping';
++}
 diff --git a/src/renderer/settings/components/AiSection.tsx b/src/renderer/settings/components/AiSection.tsx
 new file mode 100644
 --- /dev/null
 +++ b/src/renderer/settings/components/AiSection.tsx
-@@ -0,0 +1,104 @@
+@@ -0,0 +1,119 @@
 +import { Button, Checkbox, Dropdown, Input, Option, Textarea } from '@fluentui/react-components';
 +import { PeopleCommunity24Regular } from '@fluentui/react-icons';
 +import { useEffect, useRef, useState } from 'react';
@@ -755,7 +1565,7 @@ new file mode 100644
 +  const t = useText();
 +  const zh = t.lang === 'zh-CN';
 +  const label = (cn: string, en: string) => zh ? cn : en;
-+  const kinds = { none: label('只发 ping', 'Just ping'), 'open-ai': label('直接呼出 AI', 'Open AI'), assistant: label('打开智能面板', 'Assistant panel'), 'copy-prompt': label('复制提示词', 'Copy prompt'), reminder: label('本地提醒', 'Local reminder') };
++  const kinds = { none: label('只发 ping', 'Just ping'), 'open-ai': label('直接呼出 AI', 'Open AI'), assistant: label('打开智能面板', 'Assistant panel'), 'api-bubble': label('API 气泡直答', 'API bubble'), 'copy-prompt': label('复制提示词', 'Copy prompt'), reminder: label('本地提醒', 'Local reminder') };
 +  const [state, setState] = useState<AiState | null>(null);
 +  const [context, setContext] = useState('');
 +  const [key, setKey] = useState('');
@@ -806,6 +1616,21 @@ new file mode 100644
 +      </Dropdown>
 +    </SettingRow>
 +    <div className="card aiPanel">
++      <h3>{label('屏幕答案气泡', 'On-screen answers')}</h3>
++      <p className="desc">{label('将某个 ping 的动作选为“API 气泡直答”后，只在 AI 模式下，本机发出该信号时自动读取所选上下文，并发送到你配置的 API。解释、翻译、聊天建议由各自提示词决定。', 'API bubble actions read the chosen context and send it to your configured API, only for your local pings in AI mode.')}</p>
++      <Dropdown aria-label={label('气泡上下文', 'Bubble context')} value={s.aiBubbleContext === 'screen' ? label('信号附近屏幕（需识图模型）', 'Screen near ping (vision model)') : label('剪贴板文字', 'Clipboard text')} selectedOptions={[s.aiBubbleContext]} onOptionSelect={(_, d) => void update({ aiBubbleContext: d.optionValue as Settings['aiBubbleContext'] })}>
++        <Option value="screen">{label('信号附近屏幕（需识图模型）', 'Screen near ping (vision model)')}</Option><Option value="clipboard">{label('剪贴板文字', 'Clipboard text')}</Option>
++      </Dropdown>
++      <label>{label('移开鼠标后保留秒数', 'Seconds after leaving')}<Input type="number" min={5} max={300} value={String(s.aiBubbleDurationS)} onChange={(_, d) => void update({ aiBubbleDurationS: Number(d.value) })} /></label>
++      <p className="desc">{label('悬停保留答案，可选中文字并复制。娱乐 ping 和好友信号不读屏、不调用 API。', 'Hover to keep an answer; select and copy text. Fun and remote pings never capture or call the API.')}</p>
++      <Button disabled={!configured} onClick={() => {
++        const actions = { ...s.pingActions };
++        for (const id of ['assist', 'missing', 'enemyvision', 'bait'] as PingId[]) actions[id] = { ...actions[id], kind: 'api-bubble' };
++        void update({ aiAssist: true, pingActions: actions });
++      }}>{label('启用求助／问号／翻译／聊天气泡', 'Enable help / question / translation / reply bubbles')}</Button>
++      {!configured ? <p className="desc">{label('先在下方保存 API 密钥和模型，再启用气泡。Codex / CC / DS 呼出仍可使用。', 'Configure your API key and model below before enabling bubbles. External AI launch remains available.')}</p> : null}
++    </div>
++    <div className="card aiPanel">
 +      <h3>{label('智能面板', 'Assistant')} · {state ? zh ? AI_SKILLS[state.ping].title : AI_SKILLS[state.ping].en : ''}</h3>
 +      <p className="desc">{label('先复制文字，再发对应 ping；也可以直接填写。确认内容后选 API 直答，或复制到 Codex / CC / DS。', 'Copy text and ping, or type here. Review it before sending to the API or opening your AI.')}</p>
 +      <Textarea aria-label={label('待分析内容', 'Context')} value={context} rows={5} resize="vertical" maxLength={20000} onChange={(_, d) => setContext(d.value)} />
@@ -847,11 +1672,11 @@ diff --git a/src/shared/aiActions.ts b/src/shared/aiActions.ts
 new file mode 100644
 --- /dev/null
 +++ b/src/shared/aiActions.ts
-@@ -0,0 +1,52 @@
+@@ -0,0 +1,53 @@
 +import { ALL_PINGS, type PingId } from './pings';
 +import { isAiTarget, type AiTarget } from './aiTargets';
 +
-+export const ACTION_KINDS = ['none', 'open-ai', 'assistant', 'copy-prompt', 'reminder'] as const;
++export const ACTION_KINDS = ['none', 'open-ai', 'assistant', 'api-bubble', 'copy-prompt', 'reminder'] as const;
 +export type ActionKind = typeof ACTION_KINDS[number];
 +export interface PingAction { kind: ActionKind; target: AiTarget | 'default'; prompt: string }
 +export type PingActions = Record<PingId, PingAction>;
@@ -900,6 +1725,7 @@ new file mode 100644
 +export interface AiState { revision: number; ping: PingId; context: string; response: string; error: string; busy: boolean; screenshot?: string }
 +export interface AiRequest { revision: number; context: string; includeScreenshot?: boolean }
 +export type AiResult = { ok: true } | { ok: false; error: string };
++export interface AiBubble { x: number; y: number; title: string; body: string; pingId: PingId; ms: number }
 diff --git a/src/shared/aiTargets.ts b/src/shared/aiTargets.ts
 new file mode 100644
 --- /dev/null
@@ -907,7 +1733,7 @@ new file mode 100644
 @@ -0,0 +1,10 @@
 +/** Fixed destinations: opening an AI never submits a prompt or runs a command. */
 +export const AI_TARGETS = {
-+  codex: { name: 'Codex', url: 'codex://launch' },
++  codex: { name: 'Codex', url: 'codex://threads/new' },
 +  cc: { name: 'Claude Code (CC)', url: 'claude://code' },
 +  deepseek: { name: 'DeepSeek (DS)', url: 'https://chat.deepseek.com/' },
 +} as const;
@@ -919,7 +1745,7 @@ diff --git a/tests/main/aiAssist.test.ts b/tests/main/aiAssist.test.ts
 new file mode 100644
 --- /dev/null
 +++ b/tests/main/aiAssist.test.ts
-@@ -0,0 +1,119 @@
+@@ -0,0 +1,157 @@
 +import { EventEmitter } from 'node:events';
 +import { afterEach, expect, it, vi } from 'vitest';
 +import { clipboard, shell } from 'electron';
@@ -931,6 +1757,7 @@ new file mode 100644
 +import { AI_TARGETS, type AiTarget } from '../../src/shared/aiTargets';
 +
 +vi.mock('electron', () => ({ shell: { openExternal: vi.fn() }, clipboard: { readText: vi.fn(), writeText: vi.fn() } }));
++vi.mock('node:child_process', () => ({ execFile: vi.fn((_file, _args, _options, callback) => callback(null, 'True\n')) }));
 +afterEach(() => { vi.useRealTimers(); vi.resetAllMocks(); vi.unstubAllGlobals(); });
 +
 +it('opens the chosen AI only for enabled local assistance, suppresses bursts, and reports launch failures', async () => {
@@ -942,7 +1769,7 @@ new file mode 100644
 +  const open = vi.mocked(shell.openExternal).mockResolvedValue();
 +  const assistant = new AiAssistant({
 +    settings: () => normalizeSettings({ ...DEFAULT_SETTINGS, aiAssist: enabled, aiAssistTarget: target }), enabled: () => true,
-+    keys: { read: () => null } as AiKeyStore, capture: vi.fn(), show: vi.fn(), toast: failed,
++    keys: { read: () => null } as AiKeyStore, capture: vi.fn(), show: vi.fn(), toast: failed, bubble: vi.fn(),
 +  });
 +  registerAiAssist(overlays, assistant);
 +  overlays.emit('shared', { id: 'assist' });
@@ -952,7 +1779,7 @@ new file mode 100644
 +  expect(open).not.toHaveBeenCalled();
 +  overlays.emit('shared', { id: 'assist' });
 +  overlays.emit('shared', { id: 'assist' });
-+  expect(open).toHaveBeenCalledExactlyOnceWith('codex://launch');
++  expect(open).toHaveBeenCalledExactlyOnceWith('codex://threads/new');
 +  await vi.advanceTimersByTimeAsync(1500);
 +  open.mockRejectedValueOnce(new Error('No protocol handler'));
 +  overlays.emit('shared', { id: 'assist' });
@@ -977,7 +1804,7 @@ new file mode 100644
 +  const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
 +  const capture = vi.fn(); const show = vi.fn();
 +  const assistant = new AiAssistant({ settings: () => normalizeSettings({ ...DEFAULT_SETTINGS }), enabled: () => true,
-+    keys: { read: () => 'test-only' } as AiKeyStore, capture, show, toast: vi.fn() });
++    keys: { read: () => 'test-only' } as AiKeyStore, capture, show, toast: vi.fn(), bubble: vi.fn() });
 +  registerAiAssist(overlays, assistant);
 +  overlays.emit('shared', { id: 'missing' });
 +  overlays.emit('remotePing', { id: 'missing' });
@@ -999,7 +1826,7 @@ new file mode 100644
 +  vi.stubGlobal('fetch', fetcher);
 +  vi.mocked(clipboard.readText).mockResolvedValue('用户复制的文字');
 +  const capture = vi.fn().mockResolvedValue('data:image/jpeg;base64,dGVzdA==');
-+  const assistant = new AiAssistant({ settings: () => s, enabled: () => true, keys: { read: () => 'test-only' } as AiKeyStore, capture, show: vi.fn(), toast: vi.fn() });
++  const assistant = new AiAssistant({ settings: () => s, enabled: () => true, keys: { read: () => 'test-only' } as AiKeyStore, capture, show: vi.fn(), toast: vi.fn(), bubble: vi.fn() });
 +  await assistant.ping('danger');
 +  expect(assistant.state()).toMatchObject({ ping: 'danger', context: '用户复制的文字', busy: false });
 +  expect(fetcher).not.toHaveBeenCalled(); expect(capture).not.toHaveBeenCalled();
@@ -1029,7 +1856,7 @@ new file mode 100644
 +  const fetcher = vi.fn((_url: unknown, options: RequestInit) => new Promise<Response>((_, reject) => options.signal!.addEventListener('abort', () => reject(new Error('aborted')))));
 +  vi.stubGlobal('fetch', fetcher);
 +  const assistant = new AiAssistant({ settings: () => settings, enabled: () => true, keys: { read: () => 'test-only' } as AiKeyStore,
-+    capture: vi.fn(), show: vi.fn(), toast: vi.fn() });
++    capture: vi.fn(), show: vi.fn(), toast: vi.fn(), bubble: vi.fn() });
 +  await assistant.ping('missing');
 +  const pending = assistant.run({ revision: assistant.state().revision, context: 'text' });
 +  await vi.advanceTimersByTimeAsync(1500);
@@ -1038,6 +1865,43 @@ new file mode 100644
 +  expect(assistant.state()).toMatchObject({ ping: 'enemyvision', response: '', error: '', busy: false });
 +  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('not shown', { status: 401 })));
 +  expect(await assistant.run({ revision: assistant.state().revision, context: 'text' })).toMatchObject({ ok: false, error: expect.stringContaining('401') });
++});
++
++it('only auto-sends selected bubble actions, showing answers beside the originating ping', async () => {
++  let s = normalizeSettings({ aiAssist: false, pingActions: { missing: { kind: 'api-bubble' } } });
++  const capture = vi.fn().mockResolvedValue('data:image/jpeg;base64,dGVzdA=='), bubble = vi.fn();
++  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '解释：这是一条本地测试回答。' } }] })));
++  vi.stubGlobal('fetch', fetcher);
++  const assistant = new AiAssistant({ settings: () => s, enabled: () => true, keys: { read: () => 'test-only' } as AiKeyStore, capture, bubble, show: vi.fn(), toast: vi.fn() });
++  const point = { id: 'missing' as const, displayId: 1, x: 120, y: 200 };
++  await assistant.ping('missing', point);
++  expect(capture).not.toHaveBeenCalled(); expect(fetcher).not.toHaveBeenCalled();
++  s = { ...s, aiAssist: true };
++  await assistant.ping('missing', point);
++  expect(capture).toHaveBeenCalledExactlyOnceWith(point);
++  expect(clipboard.readText).not.toHaveBeenCalled();
++  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toMatchObject({ messages: [{ role: 'system' }, { content: [{ type: 'text' }, { type: 'image_url' }] }] });
++  expect(bubble).toHaveBeenLastCalledWith(point, expect.objectContaining({ body: '解释：这是一条本地测试回答。', ms: 20000 }));
++});
++
++it('rejects missing keys and clipboard keys before sending, and drops cancelled screen captures', async () => {
++  let s = normalizeSettings({ aiAssist: true, pingActions: { missing: { kind: 'api-bubble' } } });
++  const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
++  const capture = vi.fn(), bubble = vi.fn(); let key: string | null = null;
++  const assistant = new AiAssistant({ settings: () => s, enabled: () => true, keys: { read: () => key } as AiKeyStore, capture, bubble, show: vi.fn(), toast: vi.fn() });
++  await assistant.ping('missing');
++  expect(capture).not.toHaveBeenCalled(); expect(bubble).toHaveBeenLastCalledWith(undefined, expect.objectContaining({ body: expect.stringContaining('配置 API') }));
++  vi.useFakeTimers(); vi.advanceTimersByTime(2000); key = 'test-only';
++  s = { ...s, aiBubbleContext: 'clipboard' };
++  vi.mocked(clipboard.readText).mockResolvedValue('sk-private-secret-token');
++  await assistant.ping('missing');
++  expect(fetcher).not.toHaveBeenCalled(); expect(capture).not.toHaveBeenCalled();
++  vi.advanceTimersByTime(2000); s = { ...s, aiBubbleContext: 'screen' };
++  let finish!: (value: string) => void;
++  capture.mockImplementation(() => new Promise<string>((resolve) => { finish = resolve; }));
++  const pending = assistant.ping('missing');
++  assistant.cancel(); finish('data:image/jpeg;base64,old'); await pending;
++  expect(fetcher).not.toHaveBeenCalled(); expect(assistant.state().screenshot).toBeUndefined();
 +});
 diff --git a/tests/main/aiKeyStore.test.ts b/tests/main/aiKeyStore.test.ts
 new file mode 100644
@@ -1060,6 +1924,46 @@ new file mode 100644
 +  expect(new AiKeyStore(dir).read()).toBe('dummy-test-key'); keys.clear(); expect(keys.read()).toBeNull();
 +  vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(false);
 +  expect(() => keys.save('dummy-test-key')).toThrow('加密'); expect(keys.read()).toBeNull();
++});
+diff --git a/tests/main/aiLaunch.test.ts b/tests/main/aiLaunch.test.ts
+new file mode 100644
+--- /dev/null
++++ b/tests/main/aiLaunch.test.ts
+@@ -0,0 +1,35 @@
++import { afterEach, beforeEach, expect, it, vi } from 'vitest';
++import { execFile } from 'node:child_process';
++import { shell } from 'electron';
++import { openAi } from '../../src/main/aiLaunch';
++
++vi.mock('electron', () => ({ shell: { openExternal: vi.fn() } }));
++vi.mock('node:child_process', () => ({ execFile: vi.fn() }));
++const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
++const finishWith = (stdout: string) => ((...args: unknown[]) => {
++  const callback = args.at(-1) as (error: Error | null, stdout: string, stderr: string) => void;
++  callback(null, stdout, '');
++}) as typeof execFile;
++beforeEach(() => {
++  Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
++  vi.mocked(shell.openExternal).mockResolvedValue();
++  vi.mocked(execFile).mockImplementation(finishWith('True\n'));
++});
++afterEach(() => { Object.defineProperty(process, 'platform', originalPlatform); vi.resetAllMocks(); });
++
++it('uses the supported Codex new-chat link and activates its window on Windows', async () => {
++  await openAi('codex');
++  expect(shell.openExternal).toHaveBeenCalledExactlyOnceWith('codex://threads/new');
++  expect(execFile).toHaveBeenCalledWith(expect.stringMatching(/powershell\.exe$/),
++    expect.arrayContaining(['Hidden', expect.stringContaining('AttachThreadInput')]),
++    { windowsHide: true, timeout: 8000 }, expect.any(Function));
++});
++
++it('reports failed activation and skips Windows activation for other targets and platforms', async () => {
++  vi.mocked(execFile).mockImplementation(finishWith('False\n'));
++  await expect(openAi('codex')).rejects.toThrow('could not be activated');
++  await openAi('cc'); await openAi('deepseek');
++  Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
++  await openAi('codex');
++  expect(execFile).toHaveBeenCalledTimes(1);
 +});
 diff --git a/tests/shared/aiActions.test.ts b/tests/shared/aiActions.test.ts
 new file mode 100644

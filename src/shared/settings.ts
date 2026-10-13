@@ -50,6 +50,8 @@ export interface Settings {
   pingActions: PingActions;
   aiApiBaseUrl: string;
   aiApiModel: string;
+  aiBubbleContext: 'screen' | 'clipboard';
+  aiBubbleDurationS: number;
   language: LanguagePref;
   /** Shown under your pings on other people's screens. */
   displayName: string;
@@ -106,6 +108,8 @@ export const DEFAULT_SETTINGS: Settings = {
   pingActions: defaultPingActions(),
   aiApiBaseUrl: 'https://api.deepseek.com',
   aiApiModel: 'deepseek-flash',
+  aiBubbleContext: 'screen',
+  aiBubbleDurationS: 20,
   language: 'auto',
   displayName: 'Player',
   tagColor: 0,
@@ -126,6 +130,7 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 export const LIMITS = {
+  aiBubbleDurationS: { min: 5, max: 300, step: 1 },
   dragThresholdPx: { min: 2, max: 40, step: 1 },
   pingSizePx: { min: 60, max: 220, step: 1 },
   pingDurationS: { min: 1, max: 8, step: 0.1 },
@@ -249,6 +254,8 @@ export function normalizeSettings(raw: unknown, platform: Platform = 'win', iden
     pingActions: normalizePingActions(r.pingActions),
     aiApiBaseUrl: apiEndpoint(r.aiApiBaseUrl) ? (r.aiApiBaseUrl as string).trim() : DEFAULT_SETTINGS.aiApiBaseUrl,
     aiApiModel: typeof r.aiApiModel === 'string' && /^[a-zA-Z0-9._:/-]{1,100}$/.test(r.aiApiModel) ? r.aiApiModel : DEFAULT_SETTINGS.aiApiModel,
+    aiBubbleContext: r.aiBubbleContext === 'clipboard' ? 'clipboard' : 'screen',
+    aiBubbleDurationS: num(r.aiBubbleDurationS, 'aiBubbleDurationS'),
     language: (LANGUAGE_PREFS as readonly unknown[]).includes(r.language) ? (r.language as LanguagePref) : DEFAULT_SETTINGS.language,
     displayName: typeof r.displayName === 'string' ? sanitizeName(r.displayName, fallbackName) : fallbackName,
     tagColor: isTagColor(r.tagColor) ? r.tagColor : isTagColor(identity.color) ? identity.color : 0,

@@ -13,7 +13,7 @@ import type { SettingsStore } from './settingsStore';
 import type { AiAssistant } from './aiAssistant';
 import type { AiKeyStore } from './aiKeyStore';
 
-const PROJECT_URL = 'https://github.com/darrenprx/lolPing';
+const PROJECT_URL = 'https://github.com/etasp/lolpin-improved';
 /** Where "What's new" goes when no update is known. */
 export const LATEST_RELEASE_URL = `${PROJECT_URL}/releases/latest`;
 

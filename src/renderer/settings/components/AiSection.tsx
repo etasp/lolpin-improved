@@ -14,7 +14,7 @@ export function AiSection({ settings: s, update }: { settings: Settings; update:
   const t = useText();
   const zh = t.lang === 'zh-CN';
   const label = (cn: string, en: string) => zh ? cn : en;
-  const kinds = { none: label('只发 ping', 'Just ping'), 'open-ai': label('直接呼出 AI', 'Open AI'), assistant: label('打开智能面板', 'Assistant panel'), 'copy-prompt': label('复制提示词', 'Copy prompt'), reminder: label('本地提醒', 'Local reminder') };
+  const kinds = { none: label('只发 ping', 'Just ping'), 'open-ai': label('直接呼出 AI', 'Open AI'), assistant: label('打开智能面板', 'Assistant panel'), 'api-bubble': label('API 气泡直答', 'API bubble'), 'copy-prompt': label('复制提示词', 'Copy prompt'), reminder: label('本地提醒', 'Local reminder') };
   const [state, setState] = useState<AiState | null>(null);
   const [context, setContext] = useState('');
   const [key, setKey] = useState('');
@@ -64,6 +64,21 @@ export function AiSection({ settings: s, update }: { settings: Settings; update:
         {Object.entries(AI_TARGETS).map(([id, target]) => <Option key={id} value={id}>{target.name}</Option>)}
       </Dropdown>
     </SettingRow>
+    <div className="card aiPanel">
+      <h3>{label('屏幕答案气泡', 'On-screen answers')}</h3>
+      <p className="desc">{label('将某个 ping 的动作选为“API 气泡直答”后，只在 AI 模式下，本机发出该信号时自动读取所选上下文，并发送到你配置的 API。解释、翻译、聊天建议由各自提示词决定。', 'API bubble actions read the chosen context and send it to your configured API, only for your local pings in AI mode.')}</p>
+      <Dropdown aria-label={label('气泡上下文', 'Bubble context')} value={s.aiBubbleContext === 'screen' ? label('信号附近屏幕（需识图模型）', 'Screen near ping (vision model)') : label('剪贴板文字', 'Clipboard text')} selectedOptions={[s.aiBubbleContext]} onOptionSelect={(_, d) => void update({ aiBubbleContext: d.optionValue as Settings['aiBubbleContext'] })}>
+        <Option value="screen">{label('信号附近屏幕（需识图模型）', 'Screen near ping (vision model)')}</Option><Option value="clipboard">{label('剪贴板文字', 'Clipboard text')}</Option>
+      </Dropdown>
+      <label>{label('移开鼠标后保留秒数', 'Seconds after leaving')}<Input type="number" min={5} max={300} value={String(s.aiBubbleDurationS)} onChange={(_, d) => void update({ aiBubbleDurationS: Number(d.value) })} /></label>
+      <p className="desc">{label('悬停保留答案，可选中文字并复制。娱乐 ping 和好友信号不读屏、不调用 API。', 'Hover to keep an answer; select and copy text. Fun and remote pings never capture or call the API.')}</p>
+      <Button disabled={!configured} onClick={() => {
+        const actions = { ...s.pingActions };
+        for (const id of ['assist', 'missing', 'enemyvision', 'bait'] as PingId[]) actions[id] = { ...actions[id], kind: 'api-bubble' };
+        void update({ aiAssist: true, pingActions: actions });
+      }}>{label('启用求助／问号／翻译／聊天气泡', 'Enable help / question / translation / reply bubbles')}</Button>
+      {!configured ? <p className="desc">{label('先在下方保存 API 密钥和模型，再启用气泡。Codex / CC / DS 呼出仍可使用。', 'Configure your API key and model below before enabling bubbles. External AI launch remains available.')}</p> : null}
+    </div>
     <div className="card aiPanel">
       <h3>{label('智能面板', 'Assistant')} · {state ? zh ? AI_SKILLS[state.ping].title : AI_SKILLS[state.ping].en : ''}</h3>
       <p className="desc">{label('先复制文字，再发对应 ping；也可以直接填写。确认内容后选 API 直答，或复制到 Codex / CC / DS。', 'Copy text and ping, or type here. Review it before sending to the API or opening your AI.')}</p>

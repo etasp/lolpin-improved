@@ -9,6 +9,7 @@ import { AiKeyStore } from '../../src/main/aiKeyStore';
 import { AI_TARGETS, type AiTarget } from '../../src/shared/aiTargets';
 
 vi.mock('electron', () => ({ shell: { openExternal: vi.fn() }, clipboard: { readText: vi.fn(), writeText: vi.fn() } }));
+vi.mock('node:child_process', () => ({ execFile: vi.fn((_file, _args, _options, callback) => callback(null, 'True\n')) }));
 afterEach(() => { vi.useRealTimers(); vi.resetAllMocks(); vi.unstubAllGlobals(); });
 
 it('opens the chosen AI only for enabled local assistance, suppresses bursts, and reports launch failures', async () => {
@@ -20,7 +21,7 @@ it('opens the chosen AI only for enabled local assistance, suppresses bursts, an
   const open = vi.mocked(shell.openExternal).mockResolvedValue();
   const assistant = new AiAssistant({
     settings: () => normalizeSettings({ ...DEFAULT_SETTINGS, aiAssist: enabled, aiAssistTarget: target }), enabled: () => true,
-    keys: { read: () => null } as AiKeyStore, capture: vi.fn(), show: vi.fn(), toast: failed,
+    keys: { read: () => null } as AiKeyStore, capture: vi.fn(), show: vi.fn(), toast: failed, bubble: vi.fn(),
   });
   registerAiAssist(overlays, assistant);
   overlays.emit('shared', { id: 'assist' });
@@ -30,7 +31,7 @@ it('opens the chosen AI only for enabled local assistance, suppresses bursts, an
   expect(open).not.toHaveBeenCalled();
   overlays.emit('shared', { id: 'assist' });
   overlays.emit('shared', { id: 'assist' });
-  expect(open).toHaveBeenCalledExactlyOnceWith('codex://launch');
+  expect(open).toHaveBeenCalledExactlyOnceWith('codex://threads/new');
   await vi.advanceTimersByTimeAsync(1500);
   open.mockRejectedValueOnce(new Error('No protocol handler'));
   overlays.emit('shared', { id: 'assist' });
@@ -55,7 +56,7 @@ it('fun mode and remote pings never read context, capture, or call AI', async ()
   const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
   const capture = vi.fn(); const show = vi.fn();
   const assistant = new AiAssistant({ settings: () => normalizeSettings({ ...DEFAULT_SETTINGS }), enabled: () => true,
-    keys: { read: () => 'test-only' } as AiKeyStore, capture, show, toast: vi.fn() });
+    keys: { read: () => 'test-only' } as AiKeyStore, capture, show, toast: vi.fn(), bubble: vi.fn() });
   registerAiAssist(overlays, assistant);
   overlays.emit('shared', { id: 'missing' });
   overlays.emit('remotePing', { id: 'missing' });
@@ -77,7 +78,7 @@ it('only submits reviewed text or explicitly included screenshots, and keeps eac
   vi.stubGlobal('fetch', fetcher);
   vi.mocked(clipboard.readText).mockResolvedValue('用户复制的文字');
   const capture = vi.fn().mockResolvedValue('data:image/jpeg;base64,dGVzdA==');
-  const assistant = new AiAssistant({ settings: () => s, enabled: () => true, keys: { read: () => 'test-only' } as AiKeyStore, capture, show: vi.fn(), toast: vi.fn() });
+  const assistant = new AiAssistant({ settings: () => s, enabled: () => true, keys: { read: () => 'test-only' } as AiKeyStore, capture, show: vi.fn(), toast: vi.fn(), bubble: vi.fn() });
   await assistant.ping('danger');
   expect(assistant.state()).toMatchObject({ ping: 'danger', context: '用户复制的文字', busy: false });
   expect(fetcher).not.toHaveBeenCalled(); expect(capture).not.toHaveBeenCalled();
@@ -107,7 +108,7 @@ it('cancels requests without letting a stale response replace a new ping, and re
   const fetcher = vi.fn((_url: unknown, options: RequestInit) => new Promise<Response>((_, reject) => options.signal!.addEventListener('abort', () => reject(new Error('aborted')))));
   vi.stubGlobal('fetch', fetcher);
   const assistant = new AiAssistant({ settings: () => settings, enabled: () => true, keys: { read: () => 'test-only' } as AiKeyStore,
-    capture: vi.fn(), show: vi.fn(), toast: vi.fn() });
+    capture: vi.fn(), show: vi.fn(), toast: vi.fn(), bubble: vi.fn() });
   await assistant.ping('missing');
   const pending = assistant.run({ revision: assistant.state().revision, context: 'text' });
   await vi.advanceTimersByTimeAsync(1500);
@@ -116,4 +117,41 @@ it('cancels requests without letting a stale response replace a new ping, and re
   expect(assistant.state()).toMatchObject({ ping: 'enemyvision', response: '', error: '', busy: false });
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('not shown', { status: 401 })));
   expect(await assistant.run({ revision: assistant.state().revision, context: 'text' })).toMatchObject({ ok: false, error: expect.stringContaining('401') });
+});
+
+it('only auto-sends selected bubble actions, showing answers beside the originating ping', async () => {
+  let s = normalizeSettings({ aiAssist: false, pingActions: { missing: { kind: 'api-bubble' } } });
+  const capture = vi.fn().mockResolvedValue('data:image/jpeg;base64,dGVzdA=='), bubble = vi.fn();
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: '解释：这是一条本地测试回答。' } }] })));
+  vi.stubGlobal('fetch', fetcher);
+  const assistant = new AiAssistant({ settings: () => s, enabled: () => true, keys: { read: () => 'test-only' } as AiKeyStore, capture, bubble, show: vi.fn(), toast: vi.fn() });
+  const point = { id: 'missing' as const, displayId: 1, x: 120, y: 200 };
+  await assistant.ping('missing', point);
+  expect(capture).not.toHaveBeenCalled(); expect(fetcher).not.toHaveBeenCalled();
+  s = { ...s, aiAssist: true };
+  await assistant.ping('missing', point);
+  expect(capture).toHaveBeenCalledExactlyOnceWith(point);
+  expect(clipboard.readText).not.toHaveBeenCalled();
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toMatchObject({ messages: [{ role: 'system' }, { content: [{ type: 'text' }, { type: 'image_url' }] }] });
+  expect(bubble).toHaveBeenLastCalledWith(point, expect.objectContaining({ body: '解释：这是一条本地测试回答。', ms: 20000 }));
+});
+
+it('rejects missing keys and clipboard keys before sending, and drops cancelled screen captures', async () => {
+  let s = normalizeSettings({ aiAssist: true, pingActions: { missing: { kind: 'api-bubble' } } });
+  const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+  const capture = vi.fn(), bubble = vi.fn(); let key: string | null = null;
+  const assistant = new AiAssistant({ settings: () => s, enabled: () => true, keys: { read: () => key } as AiKeyStore, capture, bubble, show: vi.fn(), toast: vi.fn() });
+  await assistant.ping('missing');
+  expect(capture).not.toHaveBeenCalled(); expect(bubble).toHaveBeenLastCalledWith(undefined, expect.objectContaining({ body: expect.stringContaining('配置 API') }));
+  vi.useFakeTimers(); vi.advanceTimersByTime(2000); key = 'test-only';
+  s = { ...s, aiBubbleContext: 'clipboard' };
+  vi.mocked(clipboard.readText).mockResolvedValue('sk-private-secret-token');
+  await assistant.ping('missing');
+  expect(fetcher).not.toHaveBeenCalled(); expect(capture).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(2000); s = { ...s, aiBubbleContext: 'screen' };
+  let finish!: (value: string) => void;
+  capture.mockImplementation(() => new Promise<string>((resolve) => { finish = resolve; }));
+  const pending = assistant.ping('missing');
+  assistant.cancel(); finish('data:image/jpeg;base64,old'); await pending;
+  expect(fetcher).not.toHaveBeenCalled(); expect(assistant.state().screenshot).toBeUndefined();
 });

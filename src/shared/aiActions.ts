@@ -1,7 +1,7 @@
 import { ALL_PINGS, type PingId } from './pings';
 import { isAiTarget, type AiTarget } from './aiTargets';
 
-export const ACTION_KINDS = ['none', 'open-ai', 'assistant', 'copy-prompt', 'reminder'] as const;
+export const ACTION_KINDS = ['none', 'open-ai', 'assistant', 'api-bubble', 'copy-prompt', 'reminder'] as const;
 export type ActionKind = typeof ACTION_KINDS[number];
 export interface PingAction { kind: ActionKind; target: AiTarget | 'default'; prompt: string }
 export type PingActions = Record<PingId, PingAction>;
@@ -50,3 +50,4 @@ export function apiEndpoint(raw: unknown): string | null {
 export interface AiState { revision: number; ping: PingId; context: string; response: string; error: string; busy: boolean; screenshot?: string }
 export interface AiRequest { revision: number; context: string; includeScreenshot?: boolean }
 export type AiResult = { ok: true } | { ok: false; error: string };
+export interface AiBubble { x: number; y: number; title: string; body: string; pingId: PingId; ms: number }
